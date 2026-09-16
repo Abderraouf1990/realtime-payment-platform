@@ -48,11 +48,10 @@
 
     <dependencyManagement>
         <dependencies>
-            <!-- Internal modules -->
             <dependency>
-                <groupId>com.aayadi.payment.contracts</groupId>
+                <groupId>com.aayadi.payment</groupId>
                 <artifactId>shared-contracts</artifactId>
-                <version>0.0.1-SNAPSHOT</version>
+                <version>${project.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
