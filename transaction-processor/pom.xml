@@ -12,9 +12,6 @@
 	<name>transaction-processor</name>
 	<description>transaction-processor</description>
 
-	<properties>
-		<java.version>25</java.version>
-	</properties>
 	<dependencies>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

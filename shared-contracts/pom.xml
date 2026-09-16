@@ -13,8 +13,4 @@
     <name>shared-contracts</name>
     <description>shared-contracts</description>
 
-    <properties>
-        <java.version>25</java.version>
-    </properties>
-
 </project>

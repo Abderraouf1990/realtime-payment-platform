@@ -12,9 +12,6 @@
     <name>transaction-api</name>
     <description>transaction-api</description>
 
-    <properties>
-        <java.version>25</java.version>
-    </properties>
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>
