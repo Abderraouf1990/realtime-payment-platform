@@ -23,11 +23,21 @@ Updated: 2026-09-17
   validation rules, migration, or ledger persistence exists yet.
 - Container images are pinned: `apache/kafka-native:4.1.1` and `postgres:17.6`.
 - Root `.gitignore`, README, architecture document, and the first ADR exist.
+- Local Compose infrastructure provides Kafka 4.1.1 (single-node KRaft) and PostgreSQL
+  17.6 on loopback ports 9092/5432, with named volumes, healthchecks, and a dedicated
+  network. `.env.example` contains development defaults. Host Spring applications
+  use environment-configurable connections; only the processor connects to the database.
 - GitHub Actions CI runs `./mvnw clean verify` on pushes and pull requests targeting
   `main` and `codex/build-mvp`, using Temurin 25, Maven caching, and read-only contents
   permissions. Surefire/Failsafe reports are uploaded only on failure.
 
 ## Validated State
+
+- Compose configuration validated with `docker compose --env-file .env.example config --quiet`.
+  Both services became healthy in an isolated validation project. A Kafka message and
+  PostgreSQL row survived `down` / `up` and were read by Java clients on the host via
+  localhost:9092 and localhost:5432. Temporary validation resources were cleaned up.
+- Both Spring context tests passed after adding environment-based connection properties.
 
 - CI workflow syntax validated locally with actionlint 1.7.7 (no diagnostics).
   The workflow has not yet run on GitHub; no commit, push, or publication was performed.
@@ -88,7 +98,6 @@ See [ADR 0001](adr/0001-transaction-intake-contract.md).
 - Implement the processor and ledger.
 - Define recovery, retry, poison-message, and rejection handling; test duplicate
   delivery, restart, and database outage without premature Kafka acknowledgement.
-- Add Docker Compose and normal-runtime datasource configuration.
 - Add authentication, status lookup, consumer-side correlation propagation and logging,
   distributed traces, business metrics, and operational dashboards. The event field
   supplies correlation metadata; it does not itself implement distributed tracing.

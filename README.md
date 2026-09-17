@@ -19,6 +19,72 @@ See [project state](docs/PROJECT_STATE.md), the
 [architecture](docs/architecture/real-time-payment-processing-platform.md), and
 [intake ADR](docs/adr/0001-transaction-intake-contract.md).
 
+## Local infrastructure
+
+From the repository root, with Docker running in Linux-container mode:
+
+```sh
+docker compose up -d
+docker compose ps
+docker compose logs -f kafka
+docker compose down
+```
+
+Wait for both services to become `healthy` in `docker compose ps` before starting
+the applications. Stop following logs with Ctrl+C; this does not stop Kafka.
+Compose runs only Kafka 4.1.1 in single-node KRaft mode and PostgreSQL 17.6.
+Ports bind to the host loopback interface: Kafka at `localhost:9092` and PostgreSQL
+at `localhost:5432`. The database and user default to `payments`; the password
+`payments_dev_only` is exclusively for local development.
+
+Both services share a dedicated `payments` bridge network. Kafka advertises
+`localhost:9092` to host clients and `kafka:29092` inside that network. Named volumes
+`kafka-data` and `postgres-data` retain data across `docker compose down` / `up`.
+Compose prefixes network and volume names with the project name. Keep the Kafka
+cluster ID unchanged when reusing its volume. PostgreSQL initialization variables
+apply when its data volume is empty; editing them does not update existing database
+users or passwords.
+
+Optionally copy `.env.example` to `.env` and adjust the development values:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Compose reads `.env` automatically; host Spring Boot applications do not. Defaults
+already match, so no exports are necessary for the standard setup. For custom
+values, set the matching environment variables in each application's shell or IDE.
+For example, if you changed the ports and password in `.env`:
+
+```powershell
+$env:KAFKA_PORT = '19092'
+$env:KAFKA_BOOTSTRAP_SERVERS = 'localhost:19092'
+$env:POSTGRES_PORT = '15432'
+$env:POSTGRES_PASSWORD = 'another_dev_only_password'
+```
+
+The processor also accepts `POSTGRES_HOST`, `POSTGRES_DB`, and `POSTGRES_USER`.
+Only the processor connects to PostgreSQL; the API uses Kafka only.
+`KAFKA_BOOTSTRAP_SERVERS` overrides the host Kafka address in both applications.
+
+Topic auto-creation is disabled. After Kafka is healthy, provision the intake topic:
+
+```sh
+docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists --topic transactions.received --partitions 3 --replication-factor 1
+```
+
+Run the applications on the host in separate terminals:
+
+```powershell
+.\mvnw.cmd -pl shared-contracts -am install
+.\mvnw.cmd -pl transaction-api spring-boot:run
+# In another terminal:
+.\mvnw.cmd -pl transaction-processor spring-boot:run
+```
+
+The processor currently starts its infrastructure connections but has no consumer
+or ledger implementation. The Testcontainers demo below is an alternative to Compose.
+
 ## Run the intake demo
 
 Prerequisites: JDK 25 (`JAVA_HOME` configured), Docker with Linux containers, and
@@ -107,5 +173,4 @@ separated into a Failsafe phase. Kafka is pinned to `4.1.1` and PostgreSQL to `1
 Spring Boot manages JUnit Jupiter 6.0.1, as required by Spring Framework 7, despite
 the older JUnit 5 wording in the project instructions.
 
-Compose, CI, ledger migrations, consumer recovery tests, and operational dashboards
-remain future work.
+Ledger migrations, consumer recovery tests, and operational dashboards remain future work.
