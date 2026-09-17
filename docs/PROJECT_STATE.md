@@ -1,56 +1,114 @@
 # Project State
 
-## Current Validated State
+Updated: 2026-09-17
 
-- Maven multi-module repository initialized.
-- Modules: `shared-contracts`, `transaction-api`, and `transaction-processor`.
-- Maven Wrapper added for reproducible builds.
-- Parent POM manages Java 25 and Spring Boot 4.0.1.
-- `shared-contracts` inherits from the parent POM.
-- `transaction-api` has Spring Web MVC, validation, Kafka, Actuator, and Testcontainers dependencies.
-- `transaction-processor` has Kafka, JPA, PostgreSQL, Flyway, Actuator, and Testcontainers dependencies.
-- Both Spring Boot applications currently contain only bootstrap classes and context-load tests.
+## Current Implementation
+
+- Maven modules: `shared-contracts`, `transaction-api`, and `transaction-processor`.
+- Parent manages Java 25 and Spring Boot 4.0.1; Maven Wrapper pins Maven 3.9.0.
+- `shared-contracts` contains framework-free `contracts.v1.TransactionReceived`
+  (including `correlationId`) and `TransactionType` (`TRANSFER`).
+- `transaction-api` depends on the contracts module and implements
+  `POST /api/v1/transactions`, structural validation, ID/header matching, event mapping,
+  Kafka publication, and sanitized Problem Details errors.
+- Intake requires a client-supplied `correlationId` in the JSON body (1–64 ASCII
+  letters, digits, underscores, or hyphens). The event and 202 response preserve it.
+  It is independent of `transactionId` and does not change partitioning or idempotency.
+- A plain application service uses a publisher port and injected `Clock`. The Kafka
+  adapter waits for confirmation before the controller returns 202; uncertain or
+  failed publication returns 503. Kafka producer idempotence and `acks=all` are enabled.
+- `transaction-processor` depends on `shared-contracts` and Boot's Jackson starter.
+  A contract test verifies that its Kafka JSON deserializer preserves correlation
+  metadata. Production code remains a bootstrap application: no consumer,
+  validation rules, migration, or ledger persistence exists yet.
+- Container images are pinned: `apache/kafka-native:4.1.1` and `postgres:17.6`.
+- Root `.gitignore`, README, architecture document, and the first ADR exist.
+
+## Validated State
+
+JDK 25.0.1 and Docker Desktop are available. Docker tests require access outside this
+session's sandbox. Focused Maven commands used offline dependency resolution from
+the existing cache; Docker pulled the pinned images as needed.
+
+- 36 API unit/MVC tests: 3 mapping/service tests, 5 Kafka adapter tests, and 28 HTTP tests.
+  Coverage includes validation, identity mismatch, unchanged business identity on
+  retries, the absence of cross-request payload conflict detection, publication
+  waiting/failure/timeout/interruption, and sanitized error bodies.
+- Correlation coverage includes required-field validation, invalid and maximum-length
+  IDs, exact response/event propagation, retries, and isolation between requests.
+- One processor contract test passes using the actual Kafka JSON deserializer.
+  Its initial compilation exposed missing Jackson classes in the processor;
+  adding `spring-boot-starter-jackson` resolved that dependency gap.
+- Kafka publication integration test passed: HTTP intake to real Kafka, versioned
+  JSON fields, decimal amount, timestamp round-trip, record key, absence of Java type
+  headers, and repeat submissions retaining the same transaction ID, correlation ID,
+  and partition.
+- The integration test exposed a producer-listener generic type mismatch with Boot
+  auto-configuration; this was fixed and the test passed on rerun.
+- The processor context test passed with the pinned container configuration and
+  PostgreSQL 17.6. Flyway correctly reports that no migrations exist yet.
+- `.\mvnw.cmd clean verify` was deliberately skipped at the user's request. Packaging
+  and the full clean lifecycle have not been revalidated in this change.
+
+Commands used (from the root, PowerShell):
+
+```powershell
+.\mvnw.cmd -o '-pl=transaction-api,transaction-processor' -am '-Dtest=ReceiveTransactionTests,TransactionControllerTests,KafkaTransactionPublisherTests,TransactionReceivedContractTests' '-Dsurefire.failIfNoSpecifiedTests=false' test
+.\mvnw.cmd -o -pl transaction-processor -am '-Dtest=TransactionReceivedContractTests' '-Dsurefire.failIfNoSpecifiedTests=false' test
+.\mvnw.cmd -o '-pl=transaction-api,transaction-processor' -am '-Dtest=TransactionPublicationTests,TransactionProcessorApplicationTests' '-Dsurefire.failIfNoSpecifiedTests=false' test
+```
 
 ## Architecture Decisions
 
-- Apache Kafka is the event backbone.
-- PostgreSQL is the ledger persistence store.
-- A stable `transactionId` is the business idempotency key.
-- A database unique constraint will enforce one ledger entry per transaction.
-- `transaction-api` publishes `TransactionReceived`.
-- `transaction-processor` consumes the event and persists the result.
-- Tests use Testcontainers; image versions must be pinned.
+See [ADR 0001](adr/0001-transaction-intake-contract.md).
 
-## Current Gaps
+- `Idempotency-Key` must equal the client-supplied `transactionId`; Kafka uses that
+  ID as its record key. This does not guarantee ordering across an account.
+- Preserve `correlationId` across service boundaries, retries, and derived events.
+  It is workflow metadata and must be excluded from business-payload conflict checks.
+  The unreleased version-1 contract is extended in place; existing callers must add
+  the required field. Previously published events do not acquire correlation IDs.
+- Repeated requests can publish duplicate events. The API does not store requests
+  or reject changed payloads under an existing ID. There is no exactly-once claim.
+- A future PostgreSQL unique constraint and transactional processing will enforce
+  ledger idempotency. Duplicate payload conflicts require explicit handling.
+- Amount sign and supported-currency checks belong to the processor. An intake 202
+  confirms publication, not business validation or accounting completion.
+- Normal startup requires an externally provisioned topic. The test launcher and
+  integration configuration create a disposable three-partition, one-replica topic.
 
-- Verify `.\mvnw.cmd clean verify` with JDK 25 configured in the environment.
-- Add `.gitignore`.
-- Add a public `README.md`.
-- Add Docker Compose for Kafka or Redpanda and PostgreSQL.
-- Pin Testcontainers image versions.
-- Add GitHub Actions CI.
-- Create `docs/architecture/` and `docs/adr/`.
+## Current Gaps and Known Build Notes
+
+- Implement the processor and ledger.
+- Define recovery, retry, poison-message, and rejection handling; test duplicate
+  delivery, restart, and database outage without premature Kafka acknowledgement.
+- Add Docker Compose, normal-runtime datasource configuration, and GitHub Actions.
+- Add authentication, status lookup, consumer-side correlation propagation and logging,
+  distributed traces, business metrics, and operational dashboards. The event field
+  supplies correlation metadata; it does not itself implement distributed tracing.
+- Spring Boot manages JUnit Jupiter 6.0.1, required by Spring Framework 7. The JUnit 5
+  wording in `AGENTS.md` is incompatible with that stack; dependencies were not downgraded.
+- Failsafe remains in `pluginManagement` only. Current container-backed `*Tests` run
+  through Surefire; future `*IT` tests need explicit Failsafe lifecycle activation.
+- Maven/Jansi/Guava and Mockito emit Java 25 native-access, deprecated-Unsafe, and
+  dynamic-agent warnings. These did not fail the focused tests.
 
 ## Next Objective
 
-Implement the first event contract in `shared-contracts`:
+Complete the walking skeleton: consume `TransactionReceived` and persist valid
+transactions idempotently in PostgreSQL, with Flyway migrations and pinned-container
+integration tests.
 
-```java
-TransactionReceived
-```
+## Acceptance Criteria for the Next Objective
 
-Then implement `POST /api/v1/transactions` in `transaction-api`:
-
-1. Validate the request structure.
-2. Require an idempotency key.
-3. Map the request to `TransactionReceived`.
-4. Publish it to the `transactions.received` Kafka topic.
-5. Return `202 Accepted` with a tracking identifier.
-
-## Definition of Done for the Next Objective
-
-- The API accepts a valid request and publishes exactly one event.
-- Invalid requests return a documented 4xx response.
-- Unit tests cover request validation and event mapping.
-- An integration test proves Kafka publication.
-- The Maven build passes with `.\mvnw.cmd clean verify`.
+- Version-1 events deserialize through an explicit consumer contract.
+- Consumer processing and any derived events preserve the incoming `correlationId`.
+- Deterministic business rules produce documented accepted/rejected outcomes.
+- A Flyway migration defines the ledger and a unique constraint on `transactionId`.
+- Duplicate events create one ledger entry; changed-payload duplicates have a
+  documented, tested outcome.
+- Database work commits before Kafka acknowledgement; database failures remain
+  retryable without losing the event.
+- Integration tests demonstrate API-to-ledger flow, duplicates, and recovery.
+- The API never accesses the ledger database. Documentation records only guarantees
+  demonstrated by tests.

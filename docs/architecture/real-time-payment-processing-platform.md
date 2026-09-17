@@ -25,6 +25,7 @@ A client application sends a transaction:
 ```json
 {
   "transactionId": "TX-2026-0001",
+  "correlationId": "CORR-2026-0001",
   "accountId": "ACC-100",
   "amount": 250.00,
   "currency": "EUR",
@@ -157,6 +158,10 @@ Contains Docker Compose resources for local development, followed by Kubernetes 
 ### Traceability
 
 - propagate `transactionId`, `correlationId`, and `traceId`;
+- clients supply `correlationId` in the intake JSON body; preserve it in
+  `TransactionReceived`, acceptance responses, and future downstream events;
+- `transactionId` remains the business idempotency key; `correlationId` links
+  related work across services and is separate from a distributed tracing `traceId`;
 - use structured logs without sensitive data;
 - expose technical and business metrics;
 - provide distributed traces across the API, Kafka, processor, and ledger.
