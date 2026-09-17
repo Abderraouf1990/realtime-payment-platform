@@ -23,8 +23,14 @@ Updated: 2026-09-17
   validation rules, migration, or ledger persistence exists yet.
 - Container images are pinned: `apache/kafka-native:4.1.1` and `postgres:17.6`.
 - Root `.gitignore`, README, architecture document, and the first ADR exist.
+- GitHub Actions CI runs `./mvnw clean verify` on pushes and pull requests targeting
+  `main` and `codex/build-mvp`, using Temurin 25, Maven caching, and read-only contents
+  permissions. Surefire/Failsafe reports are uploaded only on failure.
 
 ## Validated State
+
+- CI workflow syntax validated locally with actionlint 1.7.7 (no diagnostics).
+  The workflow has not yet run on GitHub; no commit, push, or publication was performed.
 
 JDK 25.0.1 and Docker Desktop are available. Docker tests require access outside this
 session's sandbox. Focused Maven commands used offline dependency resolution from
@@ -82,7 +88,7 @@ See [ADR 0001](adr/0001-transaction-intake-contract.md).
 - Implement the processor and ledger.
 - Define recovery, retry, poison-message, and rejection handling; test duplicate
   delivery, restart, and database outage without premature Kafka acknowledgement.
-- Add Docker Compose, normal-runtime datasource configuration, and GitHub Actions.
+- Add Docker Compose and normal-runtime datasource configuration.
 - Add authentication, status lookup, consumer-side correlation propagation and logging,
   distributed traces, business metrics, and operational dashboards. The event field
   supplies correlation metadata; it does not itself implement distributed tracing.
