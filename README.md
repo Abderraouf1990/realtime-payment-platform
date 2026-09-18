@@ -4,8 +4,8 @@ A Java 25 / Spring Boot 4.0.1 payment-processing demonstrator with the intended 
 
 `Transaction API -> Kafka -> Transaction Processor -> PostgreSQL`
 
-The API intake slice is implemented. The processor is still a bootstrap application;
-ledger persistence and end-to-end idempotency are not implemented yet.
+The API intake slice and the ledger schema migration are implemented. The processor
+does not yet consume events or write ledger entries; end-to-end idempotency remains pending.
 
 ## Modules
 
@@ -82,8 +82,39 @@ Run the applications on the host in separate terminals:
 .\mvnw.cmd -pl transaction-processor spring-boot:run
 ```
 
-The processor currently starts its infrastructure connections but has no consumer
-or ledger implementation. The Testcontainers demo below is an alternative to Compose.
+The processor applies its Flyway migrations on startup but has no consumer or ledger
+writer yet. The Testcontainers demo below is an alternative to Compose.
+
+## Ledger schema
+
+The processor already includes `spring-boot-starter-flyway`,
+`flyway-database-postgresql`, and the PostgreSQL JDBC driver (runtime scope).
+Flyway discovers `src/main/resources/db/migration/V1__create_ledger_transactions.sql`
+and creates `ledger_transactions` in the connection's default application schema
+(`public` with the supplied local setup). The SQL does not hard-code a schema.
+
+| Column | PostgreSQL type | Constraint |
+| --- | --- | --- |
+| `id` | `BIGINT GENERATED ALWAYS AS IDENTITY` | Primary key |
+| `transaction_id` | `VARCHAR(64)` | Not null, unique |
+| `correlation_id`, `account_id` | `VARCHAR(64)` | Not null |
+| `amount` | `NUMERIC(17,2)` | Not null |
+| `currency` | `VARCHAR(3)` | Not null |
+| `type` | `VARCHAR(32)` | Not null |
+| `received_at`, `processed_at` | `TIMESTAMPTZ` | Not null |
+
+`processed_at` must be supplied by the future processor when recording the result.
+Timestamps represent instants; PostgreSQL retains microsecond precision, not the
+original timezone offset. Amount positivity and supported-currency rules remain
+part of future business validation.
+
+The primary key and unique constraint supply their own indexes. The only additional
+index is `(account_id, received_at DESC)` for account-history queries. No duplicate
+index on `transaction_id` or speculative per-column indexes are added.
+
+The unique constraint prevents duplicate transaction IDs at the database boundary;
+consumer retries, conflict handling, and acknowledgement ordering are not implemented.
+Once applied, keep V1 unchanged and introduce subsequent schema changes as V2, V3, etc.
 
 ## Run the intake demo
 
@@ -155,6 +186,21 @@ or internal failure details. This local demo does not yet implement authenticati
 
 ## Tests
 
+Run the PostgreSQL migration integration tests (Docker required; no Kafka needed):
+
+```powershell
+.\mvnw.cmd -pl transaction-processor -am '-Dtest=LedgerMigrationTests' '-Dsurefire.failIfNoSpecifiedTests=false' test
+```
+
+The pinned `postgres:17.6` container proves Flyway V1 application and repeat-run
+behavior, the default-schema table and unique constraint, generated IDs, exact
+amount/timestamp storage, duplicate rejection (`23505`), and null-ID rejection (`23502`).
+Run all processor tests, including Spring startup, with:
+
+```powershell
+.\mvnw.cmd -pl transaction-processor -am test
+```
+
 Run focused unit and MVC tests without Docker:
 
 ```powershell
@@ -173,4 +219,4 @@ separated into a Failsafe phase. Kafka is pinned to `4.1.1` and PostgreSQL to `1
 Spring Boot manages JUnit Jupiter 6.0.1, as required by Spring Framework 7, despite
 the older JUnit 5 wording in the project instructions.
 
-Ledger migrations, consumer recovery tests, and operational dashboards remain future work.
+Ledger writing, consumer recovery tests, and operational dashboards remain future work.
