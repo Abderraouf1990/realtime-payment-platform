@@ -5,7 +5,8 @@ A Java 25 / Spring Boot 4.0.1 payment-processing demonstrator with the intended 
 `Transaction API -> Kafka -> Transaction Processor -> PostgreSQL`
 
 The API publishes events and the processor consumes them into the PostgreSQL ledger,
-with database-backed deduplication and commit-before-acknowledgement ordering.
+with database-backed deduplication and commit-before-acknowledgement ordering for
+accepted transactions. Business rejections are temporarily logged and acknowledged.
 
 ## Modules
 
@@ -93,9 +94,22 @@ Compose with both host applications for the complete flow.
 
 The listener uses the shared `TransactionReceived` contract. JSON deserialization
 selects that class explicitly and ignores Java type headers. The processor checks
-schema version 1, required fields, ID syntax, positive amounts fitting NUMERIC(17,2),
-and three-letter uppercase currency codes. A supported-currency whitelist and
-durable business rejection outcomes remain future work.
+schema version 1, identity fields and timestamp before invoking pure `TransactionRules`:
+amount must be strictly positive, currency exactly `EUR` (no normalization), and
+type `TRANSFER`. Missing business values also fail their corresponding rule.
+All violated rules are collected in a stable order. `ProcessingResult` explicitly
+distinguishes `Accepted` (inserted or duplicate) from `Rejected` (reason codes).
+Rejected events never call the ledger store. Accepted amounts must additionally
+fit NUMERIC(17,2); invalid representation remains a contract error.
+
+Rejections log only transaction ID, correlation ID, and reason codes:
+`AMOUNT_NOT_POSITIVE`, `CURRENCY_NOT_EUR`, `TYPE_NOT_TRANSFER`. The listener returns
+normally after logging, so RECORD acknowledgement advances the offset without a
+ledger write. This temporary policy avoids repeated consumption of deterministic
+business rejections. **There is no durable rejection record**: after offset commit,
+the consumer group does not replay the rejection automatically; log retention is
+not an audit guarantee. A crash before offset commit may repeat the rejection log.
+No retry topic or DLQ is introduced. See [ADR 0003](docs/adr/0003-business-rejections.md).
 
 `ProcessTransaction` maps the event to a ledger entry and supplies `processed_at`
 from an injected UTC clock. A transactional JDBC adapter inserts it using
@@ -107,16 +121,17 @@ data, amounts, raw JSON, and underlying exception details.
 
 Kafka auto-commit is disabled. Spring Kafka `RECORD` acknowledgement commits the
 offset synchronously after the listener returns successfully, which happens only
-after the JDBC transaction has committed (or an identical duplicate was verified).
+after the JDBC transaction has committed (or an identical duplicate was verified)
+for accepted events. Business rejections use the temporary logging policy above.
 Delivery is **at least once**: a crash between database commit and offset commit
 replays the event, and the unique constraint prevents a second ledger entry.
 There is no distributed Kafka/database transaction or exactly-once claim.
 
-Any processing or deserialization failure stops the listener without recovering,
+Technical, contract, or deserialization failures stop the listener without recovering,
 skipping, or acknowledging the failed record. There are no retry topics or DLQ.
 Correct the underlying problem and restart the processor to replay from the last
 committed offset. The process itself may remain running with its listener stopped;
-an invalid event or conflicting duplicate requires operator intervention and will
+a malformed event or conflicting duplicate requires operator intervention and will
 block consumption again on restart. Automated recovery and listener-health
 monitoring are not implemented. A new group starts at the earliest retained event.
 See [ADR 0002](docs/adr/0002-ledger-consumption.md).
@@ -141,8 +156,7 @@ and creates `ledger_transactions` in the connection's default application schema
 
 `processed_at` is supplied by the processor when recording the result.
 Timestamps represent instants; PostgreSQL retains microsecond precision, not the
-original timezone offset. The processor enforces amount positivity; supported-currency
-rules remain future work.
+original timezone offset. The processor accepts only positive EUR transfers.
 
 The primary key and unique constraint supply their own indexes. The only additional
 index is `(account_id, received_at DESC)` for account-history queries. No duplicate
@@ -204,9 +218,11 @@ endpoint yet.
   Missing, blank, or malformed correlation IDs return 400 without publication.
 - `amount` is decimal with at most 15 integer and 2 fractional digits. Currency is
   three uppercase letters; `TRANSFER` is the only current transaction type.
-- Sign checks belong to the processor; supported-currency rules remain future work.
-  A structurally valid negative amount can receive 202 at intake and subsequently
-  stop the processor. There is no durable rejection outcome yet.
+- The processor accepts only positive EUR transfers. A structurally valid negative
+  amount or non-EUR currency can receive 202 at intake, then be logged as rejected
+  and acknowledged without a ledger entry. There is no durable rejection outcome yet.
+- The shared enum currently contains only `TRANSFER`. A missing type is a business
+  rejection; an unknown JSON enum value fails deserialization and stops the consumer.
 - Retry with the same ID, key, and payload. Retries may publish multiple events.
   Reusing an ID with a changed payload is not detected across requests yet.
 
@@ -243,6 +259,11 @@ spoofed Java type headers, verifies duplicate handling, and injects a SQL failur
 to prove the offset remains uncommitted before successful replay on listener restart.
 A conflicting duplicate stops consumption without changing the existing row.
 Application unit tests cover mapping, validation, and storage-error propagation.
+Rule tests cover positive/zero/negative amounts, exact currency matching, missing
+values, and all eight valid/invalid combinations of the three business rules.
+The Kafka test also verifies that a combined rejection creates no ledger row,
+advances the offset, logs both IDs and reason codes without account data, and leaves
+the listener able to process subsequent events.
 
 Run focused unit and MVC tests without Docker:
 

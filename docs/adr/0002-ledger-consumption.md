@@ -4,6 +4,9 @@ Date: 2026-09-18
 
 Status: Accepted. Updates the processor implementation status in ADR 0001.
 
+Business validation and the handling of explicit business rejections are updated
+by [ADR 0003](0003-business-rejections.md). Technical failures still follow this ADR.
+
 ## Decision
 
 Consume the shared version-1 `TransactionReceived` contract with an explicitly

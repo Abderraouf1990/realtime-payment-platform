@@ -66,6 +66,16 @@ class ProcessorKafkaIntegrationTests {
             assertThat(count(event.transactionId())).isEqualTo(1);
             assertThat(jdbc.queryForMap("SELECT * FROM ledger_transactions WHERE transaction_id = ?", event.transactionId())).isEqualTo(row);
 
+            var rejected = new TransactionReceived(1, "TX-REJECTED", "CORR-REJECTED", "PRIVATE-ACCOUNT",
+                    BigDecimal.ZERO, "USD", null, event.receivedAt());
+            long rejectedOffset = send(producer, rejected);
+            await().atMost(Duration.ofSeconds(15)).untilAsserted(() ->
+                    assertThat(committed(admin)).isEqualTo(rejectedOffset + 1));
+            assertThat(count("TX-REJECTED")).isZero();
+            assertThat(listener.isRunning()).isTrue();
+            assertThat(output.getOut()).contains("Transaction rejected correlationId=CORR-REJECTED transactionId=TX-REJECTED",
+                    "reasons=[AMOUNT_NOT_POSITIVE, CURRENCY_NOT_EUR, TYPE_NOT_TRANSFER]");
+
             jdbc.execute("ALTER TABLE ledger_transactions ADD CONSTRAINT test_storage_failure CHECK (transaction_id <> 'TX-FAIL')");
             long failed = send(producer, event("TX-FAIL", "CORR-FAIL", "10.00"));
             await().atMost(Duration.ofSeconds(15)).until(() -> !listener.isRunning());

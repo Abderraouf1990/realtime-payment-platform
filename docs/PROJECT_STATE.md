@@ -21,7 +21,11 @@ Updated: 2026-09-18
   A contract test verifies that its Kafka JSON deserializer preserves correlation
   metadata. Flyway V1 creates `ledger_transactions` in the default application schema.
   The consumer now maps shared events through a plain application service to a
-  transactional JDBC ledger store. It validates version/shape and positive amounts.
+  transactional JDBC ledger store. Pure `TransactionRules` require positive amounts,
+  exactly EUR, and TRANSFER before persistence. `ProcessingResult` distinguishes
+  acceptance from business rejection; all rejection reasons are accumulated.
+  Rejections never call the ledger store and are logged with transaction/correlation
+  IDs before normal listener return permits acknowledgement. They are not durable.
   Explicit JSON deserialization ignores Java type headers. Consumer group and topic
   are configurable, with local defaults.
 - Flyway's Boot starter, PostgreSQL database support, and PostgreSQL JDBC runtime
@@ -41,6 +45,14 @@ Updated: 2026-09-18
   permissions. Surefire/Failsafe reports are uploaded only on failure.
 
 ## Validated State
+
+- 2026-09-18: `.\mvnw.cmd -o -pl transaction-processor -am test` passed all 33 tests
+  after business-rule separation (no failures or skips). Unit coverage includes all
+  eight rule combinations, positive boundaries, zero/negative/missing amounts, exact
+  EUR matching, missing type, and no store calls on rejection. Kafka + PostgreSQL
+  integration proves a combined rejection logs IDs/reasons, creates no ledger row,
+  advances its offset, and permits subsequent processing. Technical-failure replay
+  and deduplication still pass. No API, shared-contract, or migration changes.
 
 - 2026-09-18: `.\mvnw.cmd -o -pl transaction-processor -am test` passed all 10 processor
   tests. New application unit tests cover mapping, validation and storage failures.
@@ -98,7 +110,8 @@ Commands used (from the root, PowerShell):
 ## Architecture Decisions
 
 See [ADR 0001](adr/0001-transaction-intake-contract.md) and
-[ADR 0002](adr/0002-ledger-consumption.md).
+[ADR 0002](adr/0002-ledger-consumption.md) and
+[ADR 0003](adr/0003-business-rejections.md).
 
 - `Idempotency-Key` must equal the client-supplied `transactionId`; Kafka uses that
   ID as its record key. This does not guarantee ordering across an account.
@@ -113,7 +126,9 @@ See [ADR 0001](adr/0001-transaction-intake-contract.md) and
   `ON CONFLICT DO NOTHING` and compares business fields for duplicates. Correlation
   and timestamps are excluded from comparison; first committed metadata is retained.
 - Kafka auto-commit is disabled; RECORD acknowledgement follows committed database
-  work or verified duplication. Failures stop the listener without skipping records.
+  work or verified duplication for accepted events. Business rejections are temporarily
+  logged and acknowledged without ledger access. Technical/contract failures stop
+  the listener without skipping records.
   Recovery requires correcting the failure and restarting; no retry/DLQ topics exist.
   This is at-least-once delivery with idempotent database effects.
 - Amount sign and supported-currency checks belong to the processor. An intake 202
@@ -124,10 +139,10 @@ See [ADR 0001](adr/0001-transaction-intake-contract.md) and
 
 ## Current Gaps and Known Build Notes
 
-- Define durable business rejection and operational recovery for invalid events;
-  currently failures stop consumption until operator intervention. Add listener
+- Define durable business rejection storage and operational recovery for malformed
+  events; currently technical/contract failures stop consumption. Add listener
   health monitoring: the application process can remain alive after the listener stops.
-- Add supported-currency rules, concurrent duplicate tests, process-crash testing,
+- Add concurrent duplicate tests, process-crash testing,
   and a combined HTTP-to-ledger test. SQL failure/restart is tested, not a database
   network outage or a crash between database and offset commits.
 - Add authentication, status lookup,
@@ -142,12 +157,12 @@ See [ADR 0001](adr/0001-transaction-intake-contract.md) and
 
 ## Next Objective
 
-Define and implement durable accepted/rejected business outcomes so an invalid
-transaction does not require manual intervention or indefinitely block consumption.
+Persist business rejection outcomes idempotently, replacing the temporary log-and-ack
+policy with durable traceability before acknowledgement.
 
 ## Acceptance Criteria for the Next Objective
 
-- Document supported currencies, rejection reasons, and conflict policy in an ADR.
+- Define rejection storage and repeated/conflicting rejection policy in an ADR.
 - Persist outcomes idempotently and preserve correlation metadata without changing
   the API's database isolation or acknowledging before durable completion.
 - Test valid and rejected HTTP-to-ledger flows, repeated delivery, and recovery.
