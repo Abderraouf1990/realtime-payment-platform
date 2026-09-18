@@ -29,7 +29,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Import(TestcontainersConfiguration.class)
 @SpringBootTest
 @AutoConfigureMockMvc
-class TransactionPublicationTests {
+class TransactionPublicationIT {
     @Autowired
     private MockMvc mvc;
     @Autowired

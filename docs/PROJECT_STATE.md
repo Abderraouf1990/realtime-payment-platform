@@ -4,7 +4,8 @@ Updated: 2026-09-18
 
 ## Current Implementation
 
-- Maven modules: `shared-contracts`, `transaction-api`, and `transaction-processor`.
+- Maven application modules: `shared-contracts`, `transaction-api`, and `transaction-processor`.
+  `payment-e2e-tests` runs the packaged applications in separate JVMs for black-box testing.
 - Parent manages Java 25 and Spring Boot 4.0.1; Maven Wrapper pins Maven 3.9.0.
 - `shared-contracts` contains framework-free `contracts.v1.TransactionReceived`
   (including `correlationId`) and `TransactionType` (`TRANSFER`).
@@ -45,6 +46,21 @@ Updated: 2026-09-18
   permissions. Surefire/Failsafe reports are uploaded only on failure.
 
 ## Validated State
+
+- 2026-09-18: `.\mvnw.cmd clean verify` completed with Maven BUILD SUCCESS across all
+  five reactor projects in 1m43s. Surefire ran 66 tests (36 API, 30 processor);
+  Failsafe ran 11 (2 API, 8 processor, 1 complete end-to-end scenario), with no failures,
+  errors or skips. Packaging and all integration-test/verify executions were exercised.
+  The end-to-end scenario verifies real HTTP intake, one ledger row, identical retry,
+  logged/acknowledged payload conflict without mutation, negative/non-EUR rejection,
+  and a stopped PostgreSQL server leaving the event unacknowledged. After database
+  and processor restart, the event is replayed once into the ledger. Recovery remains
+  manual; there is no automatic retry or exactly-once guarantee.
+  The first full run exposed a test-harness issue: Docker reassigned PostgreSQL's
+  published port on restart. The test now inspects the current mapping before recovery;
+  the corrected full run passed. Application logs are saved with Failsafe reports.
+  GitHub Actions requires no change: its existing clean verify command and artifact
+  patterns already cover Failsafe. The workflow itself has not been run on GitHub.
 
 - 2026-09-18: `.\mvnw.cmd -o -pl transaction-processor -am test` passed all 38 tests
   (no failures or skips) after explicit payload-conflict handling. Unit tests cover
@@ -115,10 +131,10 @@ the existing cache; Docker pulled the pinned images as needed.
 - The integration test exposed a producer-listener generic type mismatch with Boot
   auto-configuration; this was fixed and the test passed on rerun.
 - The processor context test now passes with Flyway V1 applied automatically on startup.
-- `.\mvnw.cmd clean verify` was deliberately skipped at the user's request. Packaging
-  and the full clean lifecycle have not been revalidated in this change.
+- Earlier milestones deliberately skipped `clean verify`; the end-to-end milestone
+  now requests the full lifecycle. See the latest validation entry for its result.
 
-Commands used (from the root, PowerShell):
+Historical focused commands (before the move to Failsafe; see README for current commands):
 
 ```powershell
 .\mvnw.cmd -o '-pl=transaction-api,transaction-processor' -am '-Dtest=ReceiveTransactionTests,TransactionControllerTests,KafkaTransactionPublisherTests,TransactionReceivedContractTests' '-Dsurefire.failIfNoSpecifiedTests=false' test
@@ -169,16 +185,17 @@ See [ADR 0001](adr/0001-transaction-intake-contract.md) and
 - Define durable business rejection storage and operational recovery for malformed
   events; currently technical/contract failures stop consumption. Add listener
   health monitoring: the application process can remain alive after the listener stops.
-- Add concurrent duplicate tests, process-crash testing,
-  and a combined HTTP-to-ledger test. PostgreSQL commit failure/restart is tested, not a database
-  network outage or a crash between database and offset commits.
+- Add concurrent duplicate tests and process-crash testing between database and
+  offset commits. The end-to-end test simulates server unavailability by stopping
+  PostgreSQL, not a network partition; processor tests separately inject commit failure.
 - Add authentication, status lookup,
   distributed traces, business metrics, and operational dashboards. The event field
   supplies correlation metadata; it does not itself implement distributed tracing.
 - Spring Boot manages JUnit Jupiter 6.0.1, required by Spring Framework 7. The JUnit 5
   wording in `AGENTS.md` is incompatible with that stack; dependencies were not downgraded.
-- Failsafe remains in `pluginManagement` only. Current container-backed `*Tests` run
-  through Surefire; future `*IT` tests need explicit Failsafe lifecycle activation.
+- Failsafe is active in `integration-test` / `verify` for `*IT` tests. All container
+  tests were renamed; Surefire retains unit/MVC/contract tests. CI already invokes
+  `clean verify` and collects both report directories on failure.
 - Maven/Jansi/Guava and Mockito emit Java 25 native-access, deprecated-Unsafe, and
   dynamic-agent warnings. These did not fail the focused tests.
 

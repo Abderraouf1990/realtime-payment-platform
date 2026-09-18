@@ -15,6 +15,7 @@ accepted transactions. Business rejections are temporarily logged and acknowledg
 | `shared-contracts` | Framework-free versioned events and shared value types |
 | `transaction-api` | HTTP structural validation and confirmed Kafka publication |
 | `transaction-processor` | Kafka consumption, validation, and idempotent ledger persistence |
+| `payment-e2e-tests` | Black-box HTTP-to-ledger tests of the packaged applications |
 
 See [project state](docs/PROJECT_STATE.md), the
 [architecture](docs/architecture/real-time-payment-processing-platform.md), and
@@ -258,10 +259,46 @@ or internal failure details. This local demo does not yet implement authenticati
 
 ## Tests
 
+Run unit and MVC tests only (Surefire, no Docker required):
+
+```powershell
+.\mvnw.cmd test
+```
+
+Run the full build, unit tests and all integration tests (Docker required):
+
+```powershell
+.\mvnw.cmd clean verify
+```
+
+On Linux/macOS, use `./mvnw clean verify`. All container-backed tests use the `*IT`
+suffix and Maven Failsafe's `integration-test` / `verify` goals. Unit `*Tests` remain
+in Surefire. Reports are in each module's `target/surefire-reports` and
+`target/failsafe-reports`. GitHub Actions already runs `clean verify` and uploads
+both report directories on failure, so no workflow change is necessary.
+
+The dedicated `payment-e2e-tests` module depends on the two application artifacts
+for reactor ordering and runs their executable JARs in separate JVMs. The API's
+runtime classpath has no PostgreSQL dependency. It sends real HTTP requests to a
+random port through Kafka into PostgreSQL, using `apache/kafka-native:4.1.1` and
+`postgres:17.6`. Its scenarios cover insertion, an identical HTTP retry, a payload
+conflict, negative amount, non-EUR currency, and PostgreSQL server unavailability.
+The outage stops the disposable PostgreSQL server, confirms HTTP intake still
+succeeds and the failed event remains unacknowledged, then restarts the database
+and processor to prove successful replay. This exercises the existing manual
+restart strategy, not automatic retries. Short connection timeouts are test-only.
+Application logs are retained in `payment-e2e-tests/target/failsafe-reports`.
+
+Run the end-to-end test and its required reactor build:
+
+```powershell
+.\mvnw.cmd -pl payment-e2e-tests -am '-Dit.test=PaymentFlowIT' '-Dfailsafe.failIfNoSpecifiedTests=false' verify
+```
+
 Run the PostgreSQL migration integration tests (Docker required; no Kafka needed):
 
 ```powershell
-.\mvnw.cmd -pl transaction-processor -am '-Dtest=LedgerMigrationTests' '-Dsurefire.failIfNoSpecifiedTests=false' test
+.\mvnw.cmd -pl transaction-processor -am '-Dit.test=LedgerMigrationIT' '-Dfailsafe.failIfNoSpecifiedTests=false' verify
 ```
 
 The pinned `postgres:17.6` container proves Flyway V1 application and repeat-run
@@ -270,7 +307,7 @@ amount/timestamp storage, duplicate rejection (`23505`), and null-ID rejection (
 Run all processor tests, including Spring startup and Kafka-to-ledger integration, with:
 
 ```powershell
-.\mvnw.cmd -pl transaction-processor -am test
+.\mvnw.cmd -pl transaction-processor -am verify
 ```
 
 The Kafka + PostgreSQL tests check persisted fields and correlation logs and ignore
@@ -302,12 +339,12 @@ Run focused unit and MVC tests without Docker:
 Run the Kafka publication integration test with Docker:
 
 ```powershell
-.\mvnw.cmd -pl transaction-api -am '-Dtest=TransactionPublicationTests' '-Dsurefire.failIfNoSpecifiedTests=false' test
+.\mvnw.cmd -pl transaction-api -am '-Dit.test=TransactionPublicationIT' '-Dfailsafe.failIfNoSpecifiedTests=false' verify
 ```
 
 The repository's complete validation command remains `.\mvnw.cmd clean verify`.
-Container-backed tests currently run through Surefire as `*Tests`; they are not
-separated into a Failsafe phase. Kafka is pinned to `4.1.1` and PostgreSQL to `17.6`.
+Container-backed `*IT` tests run through Failsafe, after packaging the applications.
+Kafka is pinned to `4.1.1` and PostgreSQL to `17.6`.
 Spring Boot manages JUnit Jupiter 6.0.1, as required by Spring Framework 7, despite
 the older JUnit 5 wording in the project instructions.
 

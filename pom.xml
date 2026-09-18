@@ -29,6 +29,7 @@
         <module>shared-contracts</module>
         <module>transaction-api</module>
         <module>transaction-processor</module>
+        <module>payment-e2e-tests</module>
     </modules>
 
     <properties>
@@ -57,6 +58,20 @@
     </dependencyManagement>
 
     <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
         <pluginManagement>
             <plugins>
                 <plugin>

@@ -35,7 +35,7 @@ import static org.awaitility.Awaitility.await;
 @Import(TestcontainersConfiguration.class)
 @ExtendWith(OutputCaptureExtension.class)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
-class ProcessorKafkaIntegrationTests {
+class ProcessorKafkaIT {
     private static final String TOPIC = "transactions.received";
     private static final String GROUP = "processor-integration";
     @Autowired private KafkaContainer kafka;
