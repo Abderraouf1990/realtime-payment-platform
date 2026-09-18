@@ -1,6 +1,6 @@
 # Project State
 
-Updated: 2026-09-18
+Updated: 2026-09-19
 
 ## Current Implementation
 
@@ -47,6 +47,19 @@ Updated: 2026-09-18
 
 ## Validated State
 
+- 2026-09-19: Refactored `PaymentFlowIT` into five independent scenarios with shared
+  bootstrap/cleanup code and fresh pinned containers plus real application JARs per
+  test. Coverage retains valid intake, identical retry, conflict without mutation,
+  negative/non-EUR rejection, and PostgreSQL outage/manual restart/replay with no
+  premature acknowledgement. Logs are grouped by scenario. Resources are registered
+  as acquired and closed in reverse order even after partial startup or test failure;
+  cleanup attempts all resources and retains cleanup errors.
+  The focused E2E command passed all five scenarios on 2026-09-18:
+  `.\mvnw.cmd -pl payment-e2e-tests -am -Dit.test=PaymentFlowIT -Dfailsafe.failIfNoSpecifiedTests=false verify`.
+  The subsequent `.\mvnw.cmd clean verify` passed on 2026-09-19 in 3m25s: 66 Surefire
+  tests and 15 Failsafe tests (including five E2E), no failures, errors or skips.
+  Business code and acknowledgement/recovery policies are unchanged.
+
 - 2026-09-18: `.\mvnw.cmd clean verify` completed with Maven BUILD SUCCESS across all
   five reactor projects in 1m43s. Surefire ran 66 tests (36 API, 30 processor);
   Failsafe ran 11 (2 API, 8 processor, 1 complete end-to-end scenario), with no failures,
@@ -60,7 +73,9 @@ Updated: 2026-09-18
   published port on restart. The test now inspects the current mapping before recovery;
   the corrected full run passed. Application logs are saved with Failsafe reports.
   GitHub Actions requires no change: its existing clean verify command and artifact
-  patterns already cover Failsafe. The workflow itself has not been run on GitHub.
+  patterns already cover Failsafe. The CI workflow running `./mvnw clean verify`
+  succeeded on GitHub for commit `12dae6b`
+  ([run 35352080520](https://github.com/Abderraouf1990/realtime-payment-platform/actions/runs/35352080520)).
 
 - 2026-09-18: `.\mvnw.cmd -o -pl transaction-processor -am test` passed all 38 tests
   (no failures or skips) after explicit payload-conflict handling. Unit tests cover
@@ -109,7 +124,7 @@ Updated: 2026-09-18
 - Both Spring context tests passed after adding environment-based connection properties.
 
 - CI workflow syntax validated locally with actionlint 1.7.7 (no diagnostics).
-  The workflow has not yet run on GitHub; no commit, push, or publication was performed.
+  The CI workflow running `./mvnw clean verify` succeeded on GitHub for commit `12dae6b`.
 
 JDK 25.0.1 and Docker Desktop are available. Docker tests require access outside this
 session's sandbox. Focused Maven commands used offline dependency resolution from

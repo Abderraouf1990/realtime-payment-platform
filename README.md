@@ -288,6 +288,10 @@ succeeds and the failed event remains unacknowledged, then restarts the database
 and processor to prove successful replay. This exercises the existing manual
 restart strategy, not automatic retries. Short connection timeouts are test-only.
 Application logs are retained in `payment-e2e-tests/target/failsafe-reports`.
+`PaymentFlowIT` has five independent scenarios with shared setup/cleanup code and
+fresh containers and application processes per test. No scenario depends on test
+ordering or another test's rows/offsets. Logs are grouped by test method. Cleanup
+attempts to close every registered resource even after partial startup or test failure.
 
 Run the end-to-end test and its required reactor build:
 

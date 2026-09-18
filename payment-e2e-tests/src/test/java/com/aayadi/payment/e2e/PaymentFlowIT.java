@@ -4,6 +4,9 @@ import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.TestInfo;
 import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
@@ -16,6 +19,8 @@ import java.nio.file.Path;
 import java.sql.DriverManager;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -29,70 +34,122 @@ class PaymentFlowIT {
     private static final String GROUP = "payment-e2e";
     private static final Path LOGS = Path.of("target", "failsafe-reports").toAbsolutePath();
 
-    @Test
-    void httpToLedgerDuplicatesConflictsRejectionsAndDatabaseOutage() throws Exception {
-        Files.createDirectories(LOGS);
-        try (var kafka = new KafkaContainer("apache/kafka-native:4.1.1");
-             var postgres = new PostgreSQLContainer("postgres:17.6")) {
-            kafka.start();
-            postgres.start();
-            try (var admin = Admin.create(Map.of("bootstrap.servers", kafka.getBootstrapServers()))) {
-                admin.createTopics(List.of(new NewTopic(TOPIC, 1, (short) 1))).all().get(15, TimeUnit.SECONDS);
-                try (var api = launch("transaction-api", "api.log", kafka, List.of("--server.port=0"));
-                     var processor = launchProcessor("processor.log", kafka, postgres)) {
-                    int port = api.httpPort();
-                    processor.awaitLog("Started TransactionProcessorApplication");
-                    try (var http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()) {
-                        String valid = body("TX-E2E", "CORR-E2E", "42.00", "EUR");
-                        post(http, port, "TX-E2E", valid);
-                        awaitOffset(admin, 1);
-                        assertThat(count(postgres, "TX-E2E")).isEqualTo(1);
-                        String original = row(postgres, "TX-E2E");
+    private final Deque<AutoCloseable> resources = new ArrayDeque<>();
+    private KafkaContainer kafka;
+    private PostgreSQLContainer postgres;
+    private Admin admin;
+    private RunningApp processor;
+    private HttpClient http;
+    private int port;
+    private String scenario;
 
-                        post(http, port, "TX-E2E", valid);
-                        awaitOffset(admin, 2);
-                        assertThat(count(postgres, "TX-E2E")).isEqualTo(1);
-                        assertThat(row(postgres, "TX-E2E")).isEqualTo(original);
-                        processor.awaitLog("transactionId=TX-E2E outcome=DUPLICATE");
+    @BeforeEach
+    void startEnvironment(TestInfo test) throws Exception {
+        scenario = test.getTestMethod().orElseThrow().getName();
+        Files.createDirectories(LOGS.resolve(scenario));
+        // Register before starting: @AfterEach also runs when this setup fails partway through.
+        kafka = manage(new KafkaContainer("apache/kafka-native:4.1.1"));
+        postgres = manage(new PostgreSQLContainer("postgres:17.6"));
+        kafka.start();
+        postgres.start();
+        admin = manage(Admin.create(Map.of("bootstrap.servers", kafka.getBootstrapServers())));
+        admin.createTopics(List.of(new NewTopic(TOPIC, 1, (short) 1))).all().get(15, TimeUnit.SECONDS);
+        var api = manage(launch("transaction-api", scenario + "/api.log", kafka, List.of("--server.port=0")));
+        processor = manage(launchProcessor(scenario + "/processor.log", kafka, postgres));
+        port = api.httpPort();
+        processor.awaitLog("Started TransactionProcessorApplication");
+        http = manage(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build());
+    }
 
-                        post(http, port, "TX-E2E", body("TX-E2E", "CORR-CONFLICT", "43.00", "EUR"));
-                        awaitOffset(admin, 3);
-                        assertThat(row(postgres, "TX-E2E")).isEqualTo(original);
-                        processor.awaitLog("transactionId=TX-E2E correlationId=CORR-CONFLICT reason=PAYLOAD_CONFLICT");
-
-                        post(http, port, "TX-NEGATIVE", body("TX-NEGATIVE", "CORR-NEGATIVE", "-1.00", "EUR"));
-                        awaitOffset(admin, 4);
-                        assertThat(count(postgres, "TX-NEGATIVE")).isZero();
-                        processor.awaitLog("transactionId=TX-NEGATIVE reasons=[AMOUNT_NOT_POSITIVE]");
-                        post(http, port, "TX-USD", body("TX-USD", "CORR-USD", "10.00", "USD"));
-                        awaitOffset(admin, 5);
-                        assertThat(count(postgres, "TX-USD")).isZero();
-                        processor.awaitLog("transactionId=TX-USD reasons=[CURRENCY_NOT_EUR]");
-
-                        // Stop the server, preserving the container and its data for recovery.
-                        postgres.getDockerClient().stopContainerCmd(postgres.getContainerId()).withTimeout(1).exec();
-                        post(http, port, "TX-OUTAGE", body("TX-OUTAGE", "CORR-OUTAGE", "5.00", "EUR"));
-                        processor.awaitLog("Ledger processing failed correlationId=CORR-OUTAGE");
-                        processor.awaitLog("Consumer stopped");
-                        assertThat(committed(admin)).isEqualTo(5);
-
-                        postgres.getDockerClient().startContainerCmd(postgres.getContainerId()).exec();
-                        await().atMost(Duration.ofSeconds(30)).ignoreExceptions().untilAsserted(() ->
-                                assertThat(count(postgres, "TX-OUTAGE")).isZero());
-                        // Database recovery alone cannot restart the stopped listener.
-                        assertThat(committed(admin)).isEqualTo(5);
-                        processor.close();
-                        try (var restarted = launchProcessor("processor-restarted.log", kafka, postgres)) {
-                            restarted.awaitLog("Started TransactionProcessorApplication");
-                            awaitOffset(admin, 6);
-                            assertThat(count(postgres, "TX-OUTAGE")).isEqualTo(1);
-                            assertThat(row(postgres, "TX-E2E")).isEqualTo(original);
-                            assertThat(total(postgres)).isEqualTo(2);
-                        }
-                    }
-                }
+    @AfterEach
+    void stopEnvironment() throws Exception {
+        Throwable failure = null;
+        while (!resources.isEmpty()) {
+            try {
+                resources.pop().close();
+            } catch (Throwable error) {
+                if (failure == null) failure = error;
+                else failure.addSuppressed(error);
             }
         }
+        if (failure instanceof Exception exception) throw exception;
+        if (failure instanceof Error error) throw error;
+    }
+
+    private <T extends AutoCloseable> T manage(T resource) {
+        resources.push(resource);
+        return resource;
+    }
+
+    @Test
+    void validHttpCreatesOneLedgerRowIT() throws Exception {
+        insertValidTransaction();
+        assertThat(total(postgres)).isEqualTo(1);
+    }
+
+    @Test
+    void identicalHttpRetryKeepsOneLedgerRowIT() throws Exception {
+        String original = insertValidTransaction();
+        post(http, port, "TX-E2E", body("TX-E2E", "CORR-E2E", "42.00", "EUR"));
+        awaitOffset(admin, 2);
+        assertThat(count(postgres, "TX-E2E")).isEqualTo(1);
+        assertThat(total(postgres)).isEqualTo(1);
+        assertThat(row(postgres, "TX-E2E")).isEqualTo(original);
+        processor.awaitLog("transactionId=TX-E2E outcome=DUPLICATE");
+    }
+
+    @Test
+    void changedPayloadIsConflictWithoutMutationIT() throws Exception {
+        String original = insertValidTransaction();
+        post(http, port, "TX-E2E", body("TX-E2E", "CORR-CONFLICT", "43.00", "EUR"));
+        awaitOffset(admin, 2);
+        assertThat(row(postgres, "TX-E2E")).isEqualTo(original);
+        assertThat(total(postgres)).isEqualTo(1);
+        processor.awaitLog("transactionId=TX-E2E correlationId=CORR-CONFLICT reason=PAYLOAD_CONFLICT");
+    }
+
+    @Test
+    void negativeAmountAndNonEuroCurrencyAreRejectedIT() throws Exception {
+        post(http, port, "TX-NEGATIVE", body("TX-NEGATIVE", "CORR-NEGATIVE", "-1.00", "EUR"));
+        awaitOffset(admin, 1);
+        assertThat(count(postgres, "TX-NEGATIVE")).isZero();
+        processor.awaitLog("transactionId=TX-NEGATIVE reasons=[AMOUNT_NOT_POSITIVE]");
+        post(http, port, "TX-USD", body("TX-USD", "CORR-USD", "10.00", "USD"));
+        awaitOffset(admin, 2);
+        assertThat(count(postgres, "TX-USD")).isZero();
+        assertThat(total(postgres)).isZero();
+        processor.awaitLog("transactionId=TX-USD reasons=[CURRENCY_NOT_EUR]");
+    }
+
+    @Test
+    void databaseOutageLeavesOffsetUncommittedUntilManualRestartAndReplayIT() throws Exception {
+        String original = insertValidTransaction();
+        // Stop the server, preserving the container and its data for recovery.
+        postgres.getDockerClient().stopContainerCmd(postgres.getContainerId()).withTimeout(1).exec();
+        post(http, port, "TX-OUTAGE", body("TX-OUTAGE", "CORR-OUTAGE", "5.00", "EUR"));
+        processor.awaitLog("Ledger processing failed correlationId=CORR-OUTAGE");
+        processor.awaitLog("Consumer stopped");
+        assertThat(committed(admin)).isEqualTo(1);
+
+        postgres.getDockerClient().startContainerCmd(postgres.getContainerId()).exec();
+        await().atMost(Duration.ofSeconds(30)).ignoreExceptions().untilAsserted(() ->
+                assertThat(count(postgres, "TX-OUTAGE")).isZero());
+        // Database recovery alone cannot restart the stopped listener.
+        assertThat(committed(admin)).isEqualTo(1);
+        processor.close();
+        var restarted = manage(launchProcessor(scenario + "/processor-restarted.log", kafka, postgres));
+        restarted.awaitLog("Started TransactionProcessorApplication");
+        awaitOffset(admin, 2);
+        assertThat(count(postgres, "TX-OUTAGE")).isEqualTo(1);
+        assertThat(row(postgres, "TX-E2E")).isEqualTo(original);
+        assertThat(total(postgres)).isEqualTo(2);
+    }
+
+    private String insertValidTransaction() throws Exception {
+        post(http, port, "TX-E2E", body("TX-E2E", "CORR-E2E", "42.00", "EUR"));
+        awaitOffset(admin, 1);
+        assertThat(count(postgres, "TX-E2E")).isEqualTo(1);
+        return row(postgres, "TX-E2E");
     }
 
     private static RunningApp launchProcessor(String log, KafkaContainer kafka, PostgreSQLContainer postgres) throws Exception {
@@ -196,9 +253,15 @@ class PaymentFlowIT {
 
         @Override public void close() throws Exception {
             process.destroy();
-            if (!process.waitFor(10, TimeUnit.SECONDS)) {
+            try {
+                if (!process.waitFor(10, TimeUnit.SECONDS)) {
+                    process.destroyForcibly();
+                    assertThat(process.waitFor(10, TimeUnit.SECONDS)).isTrue();
+                }
+            } catch (InterruptedException interrupted) {
                 process.destroyForcibly();
-                assertThat(process.waitFor(10, TimeUnit.SECONDS)).isTrue();
+                Thread.currentThread().interrupt();
+                throw interrupted;
             }
         }
     }
