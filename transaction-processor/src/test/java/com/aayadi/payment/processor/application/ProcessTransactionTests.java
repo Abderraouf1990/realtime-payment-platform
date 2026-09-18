@@ -4,6 +4,9 @@ import com.aayadi.payment.contracts.v1.TransactionReceived;
 import com.aayadi.payment.contracts.v1.TransactionType;
 import com.aayadi.payment.processor.domain.LedgerEntry;
 import com.aayadi.payment.processor.domain.TransactionRules;
+import com.aayadi.payment.processor.domain.BusinessPayload;
+import java.util.Optional;
+import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -24,7 +27,7 @@ class ProcessTransactionTests {
     @ValueSource(ints = {0, 1, 2, 3, 4, 5, 6, 7})
     void evaluatesEveryCombinationBeforeAnyLedgerWrite(int violations) {
         List<LedgerEntry> entries = new ArrayList<>();
-        var processor = new ProcessTransaction(entry -> { entries.add(entry); return LedgerStore.Outcome.INSERTED; },
+        var processor = new ProcessTransaction(store(entry -> { entries.add(entry); return LedgerStore.Outcome.INSERTED; }),
                 CLOCK, new TransactionRules());
         var expected = new ArrayList<TransactionRules.RejectionReason>();
         if ((violations & 1) != 0) expected.add(TransactionRules.RejectionReason.AMOUNT_NOT_POSITIVE);
@@ -48,7 +51,7 @@ class ProcessTransactionTests {
     @Test
     void mapsSharedContractToLedgerAndSetsProcessingTime() {
         List<LedgerEntry> entries = new ArrayList<>();
-        var processor = new ProcessTransaction(entry -> { entries.add(entry); return LedgerStore.Outcome.INSERTED; }, CLOCK, new TransactionRules());
+        var processor = new ProcessTransaction(store(entry -> { entries.add(entry); return LedgerStore.Outcome.INSERTED; }), CLOCK, new TransactionRules());
         var event = event(1, new BigDecimal("250.00"));
         assertThat(processor.process(event)).isEqualTo(new ProcessingResult.Accepted(LedgerStore.Outcome.INSERTED));
         assertThat(entries).containsExactly(new LedgerEntry("TX-1", "CORR-1", "ACC-1",
@@ -57,7 +60,7 @@ class ProcessTransactionTests {
 
     @Test
     void rejectsInvalidEventsBeforePersistence() {
-        var processor = new ProcessTransaction(entry -> { throw new AssertionError("Must not persist"); }, CLOCK, new TransactionRules());
+        var processor = new ProcessTransaction(store(entry -> { throw new AssertionError("Must not persist"); }), CLOCK, new TransactionRules());
         for (var invalid : new TransactionReceived[] {null, event(2, BigDecimal.ONE),
                 event(1, new BigDecimal("1.234")),
                 event(1, new BigDecimal("1000000000000000")),
@@ -68,15 +71,29 @@ class ProcessTransactionTests {
 
     @Test
     void returnsDuplicateOutcomeAndPropagatesStorageFailure() {
-        assertThat(new ProcessTransaction(entry -> LedgerStore.Outcome.DUPLICATE, CLOCK, new TransactionRules()).process(event(1, BigDecimal.ONE)))
+        assertThat(new ProcessTransaction(store(entry -> LedgerStore.Outcome.DUPLICATE), CLOCK, new TransactionRules()).process(event(1, BigDecimal.ONE)))
                 .isEqualTo(new ProcessingResult.Accepted(LedgerStore.Outcome.DUPLICATE));
         var failure = new IllegalStateException("storage failure");
-        var processor = new ProcessTransaction(entry -> { throw failure; }, CLOCK, new TransactionRules());
+        var processor = new ProcessTransaction(store(entry -> { throw failure; }), CLOCK, new TransactionRules());
         assertThatThrownBy(() -> processor.process(event(1, BigDecimal.ONE))).isSameAs(failure);
     }
 
     private static TransactionReceived event(int version, BigDecimal amount) {
         return new TransactionReceived(version, "TX-1", "CORR-1", "ACC-1", amount,
                 "EUR", TransactionType.TRANSFER, NOW.minusSeconds(1));
+    }
+
+    @Test
+    void mapsInsertRaceConflictToBusinessRejection() {
+        var processor = new ProcessTransaction(store(entry -> LedgerStore.Outcome.CONFLICT), CLOCK, new TransactionRules());
+        assertThat(processor.process(event(1, BigDecimal.ONE)))
+                .isEqualTo(new ProcessingResult.Rejected(List.of(TransactionRules.RejectionReason.PAYLOAD_CONFLICT)));
+    }
+
+    private static LedgerStore store(Function<LedgerEntry, LedgerStore.Outcome> save) {
+        return new LedgerStore() {
+            public Optional<BusinessPayload> findPayload(String id) { return Optional.empty(); }
+            public Outcome save(LedgerEntry entry) { return save.apply(entry); }
+        };
     }
 }

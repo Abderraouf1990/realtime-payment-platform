@@ -6,6 +6,8 @@ Status: Accepted. Updates the processor implementation status in ADR 0001.
 
 Business validation and the handling of explicit business rejections are updated
 by [ADR 0003](0003-business-rejections.md). Technical failures still follow this ADR.
+Payload conflicts now follow [ADR 0004](0004-payload-conflicts.md): logged business
+rejections with acknowledgement, not exceptions that stop consumption.
 
 ## Decision
 
@@ -22,12 +24,12 @@ introducing JPA entities. Keep Flyway V1 unchanged; Hibernate only validates sch
 Insert with `ON CONFLICT ON CONSTRAINT uk_ledger_transactions_transaction_id DO NOTHING`,
 then compare account, amount,
 currency, and type when the insert was skipped. Equal business values are a successful
-duplicate; different values throw. Preserve the first committed correlation and
+duplicate; different values return CONFLICT (see ADR 0004). Preserve the first committed correlation and
 timestamps. Log the incoming correlation for every processed delivery without
 logging account details, payloads, or raw exception causes.
 
 The named PostgreSQL unique constraint is the final arbiter of transaction identity.
-Do not pre-check existence or catch all integrity errors as duplicates. The SQL
+Never rely on an existence pre-check or catch all integrity errors as duplicates. The SQL
 handles only the intended unique conflict without aborting the transaction; other
 database failures propagate. An identical duplicate returns DUPLICATE normally.
 

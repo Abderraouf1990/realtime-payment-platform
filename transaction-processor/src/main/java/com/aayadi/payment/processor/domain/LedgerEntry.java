@@ -7,4 +7,7 @@ import java.time.Instant;
 public record LedgerEntry(String transactionId, String correlationId, String accountId,
                           BigDecimal amount, String currency, TransactionType type,
                           Instant receivedAt, Instant processedAt) {
+    public BusinessPayload businessPayload() {
+        return new BusinessPayload(accountId, amount, currency, type == null ? null : type.name());
+    }
 }

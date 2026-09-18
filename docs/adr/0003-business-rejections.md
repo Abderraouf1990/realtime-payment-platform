@@ -4,6 +4,8 @@ Date: 2026-09-18
 
 Status: Accepted for the first business-validation milestone. Supersedes ADR 0002's
 stop-on-error policy only for explicit business rejections.
+The lookup/validation precedence and conflict handling below are superseded by
+[ADR 0004](0004-payload-conflicts.md); temporary log-and-ack handling remains in use.
 
 ## Decision
 

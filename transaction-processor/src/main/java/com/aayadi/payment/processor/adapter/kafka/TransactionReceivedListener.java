@@ -3,6 +3,7 @@ package com.aayadi.payment.processor.adapter.kafka;
 import com.aayadi.payment.contracts.v1.TransactionReceived;
 import com.aayadi.payment.processor.application.ProcessTransaction;
 import com.aayadi.payment.processor.application.ProcessingResult;
+import com.aayadi.payment.processor.domain.TransactionRules.RejectionReason;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,9 +29,15 @@ public class TransactionReceivedListener {
                 case ProcessingResult.Accepted accepted ->
                     LOG.info("Ledger processing completed correlationId={} transactionId={} outcome={}",
                             correlationId, event.transactionId(), accepted.outcome());
-                case ProcessingResult.Rejected rejected ->
-                    LOG.info("Transaction rejected correlationId={} transactionId={} reasons={}",
+                case ProcessingResult.Rejected rejected -> {
+                    if (rejected.reasons().contains(RejectionReason.PAYLOAD_CONFLICT)) {
+                        LOG.info("Transaction rejected transactionId={} correlationId={} reason=PAYLOAD_CONFLICT",
+                                event.transactionId(), correlationId);
+                    } else {
+                        LOG.info("Transaction rejected correlationId={} transactionId={} reasons={}",
                             correlationId, event.transactionId(), rejected.reasons());
+                    }
+                }
             }
             // Temporary policy: a logged business rejection completes processing and permits RECORD ack.
         } catch (RuntimeException exception) {

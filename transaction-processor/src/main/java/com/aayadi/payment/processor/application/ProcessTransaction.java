@@ -3,6 +3,8 @@ package com.aayadi.payment.processor.application;
 import com.aayadi.payment.contracts.v1.TransactionReceived;
 import com.aayadi.payment.processor.domain.LedgerEntry;
 import com.aayadi.payment.processor.domain.TransactionRules;
+import com.aayadi.payment.processor.domain.BusinessPayload;
+import java.util.List;
 import java.time.Clock;
 
 public class ProcessTransaction {
@@ -22,6 +24,13 @@ public class ProcessTransaction {
                 || event.receivedAt() == null) {
             throw new IllegalArgumentException("Invalid version-1 transaction event");
         }
+        var payload = new BusinessPayload(event.accountId(), event.amount(), event.currency(),
+                event.type() == null ? null : event.type().name());
+        var existing = store.findPayload(event.transactionId());
+        if (existing.isPresent()) {
+            return existing.get().matches(payload)
+                    ? new ProcessingResult.Accepted(LedgerStore.Outcome.DUPLICATE) : conflict();
+        }
         var reasons = rules.validate(event.amount(), event.currency(), event.type());
         if (!reasons.isEmpty()) {
             return new ProcessingResult.Rejected(reasons);
@@ -29,8 +38,13 @@ public class ProcessTransaction {
         if (event.amount().scale() > 2 || event.amount().precision() - event.amount().scale() > 15) {
             throw new IllegalArgumentException("Invalid version-1 amount representation");
         }
-        return new ProcessingResult.Accepted(store.save(new LedgerEntry(event.transactionId(), event.correlationId(), event.accountId(),
-                event.amount(), event.currency(), event.type(), event.receivedAt(), clock.instant())));
+        var outcome = store.save(new LedgerEntry(event.transactionId(), event.correlationId(), event.accountId(),
+                event.amount(), event.currency(), event.type(), event.receivedAt(), clock.instant()));
+        return outcome == LedgerStore.Outcome.CONFLICT ? conflict() : new ProcessingResult.Accepted(outcome);
+    }
+
+    private static ProcessingResult.Rejected conflict() {
+        return new ProcessingResult.Rejected(List.of(TransactionRules.RejectionReason.PAYLOAD_CONFLICT));
     }
 
     private static boolean validId(String value) {

@@ -99,7 +99,7 @@ amount must be strictly positive, currency exactly `EUR` (no normalization), and
 type `TRANSFER`. Missing business values also fail their corresponding rule.
 All violated rules are collected in a stable order. `ProcessingResult` explicitly
 distinguishes `Accepted` (inserted or duplicate) from `Rejected` (reason codes).
-Rejected events never call the ledger store. Accepted amounts must additionally
+New events rejected by rules never write to the ledger. Accepted new amounts must additionally
 fit NUMERIC(17,2); invalid representation remains a contract error.
 
 Rejections log only transaction ID, correlation ID, and reason codes:
@@ -111,13 +111,22 @@ the consumer group does not replay the rejection automatically; log retention is
 not an audit guarantee. A crash before offset commit may repeat the rejection log.
 No retry topic or DLQ is introduced. See [ADR 0003](docs/adr/0003-business-rejections.md).
 
-`ProcessTransaction` maps the event to a ledger entry and supplies `processed_at`
+`ProcessTransaction` first reads the payload by transactionId after envelope validation.
+An equal existing payload returns DUPLICATE; a difference on accountId, amount,
+currency or type returns a business rejection with `PAYLOAD_CONFLICT`, even when
+the changed value (for example USD) violates a new-transaction rule. Amounts compare
+numerically (`10.0` equals `10.00`); the other fields compare exactly. Correlation
+and timestamps are excluded. If no row exists, rules run before any write.
+
+For new valid events it maps the event to a ledger entry and supplies `processed_at`
 from an injected UTC clock. A transactional JDBC adapter inserts it using
 `ON CONFLICT ON CONSTRAINT uk_ledger_transactions_transaction_id DO NOTHING`.
-The PostgreSQL unique constraint is the final guarantee, with no check-before-insert
-race. Only this constraint's conflict is handled as an expected duplicate; other
+The PostgreSQL unique constraint is the final guarantee even if another writer
+inserts after the lookup. Only this constraint's conflict enters duplicate/payload-conflict handling; other
 database errors propagate. Identical business payloads are successful
-duplicates; differences in account, amount, currency, or type fail processing.
+duplicates; differences in account, amount, currency, or type return CONFLICT.
+The same comparison runs after a skipped insert to handle an intervening committed
+insert. No row is replaced and no second row is created.
 Correlation and timestamps are metadata: duplicates retain the first stored values,
 while processing logs include each incoming correlation ID. Logs exclude account
 data, amounts, raw JSON, and underlying exception details.
@@ -134,10 +143,17 @@ Technical, contract, or deserialization failures stop the listener without recov
 skipping, or acknowledging the failed record. There are no retry topics or DLQ.
 Correct the underlying problem and restart the processor to replay from the last
 committed offset. The process itself may remain running with its listener stopped;
-a malformed event or conflicting duplicate requires operator intervention and will
+a malformed event requires operator intervention and will
 block consumption again on restart. Automated recovery and listener-health
 monitoring are not implemented. A new group starts at the earliest retained event.
 See [ADR 0002](docs/adr/0002-ledger-consumption.md).
+
+Payload conflicts are logged as `transactionId=... correlationId=... reason=PAYLOAD_CONFLICT`
+using the incoming correlation ID, then acknowledged by normal listener return.
+The existing row remains entirely unchanged. This temporary policy avoids blocking
+consumption but supplies no durable conflict history. Database read/commit failures
+remain unacknowledged. An absent-ID lookup does not reserve the ID for a rejected
+invalid event; see [ADR 0004](docs/adr/0004-payload-conflicts.md) for concurrency limits.
 
 ## Ledger schema
 
@@ -264,7 +280,9 @@ INSERTED/DUPLICATE outcomes with the listener still running.
 A deferred constraint trigger injects a PostgreSQL failure at COMMIT, after INSERT
 succeeds, proving rollback with no offset advancement before successful replay on
 listener restart. This tests a database commit failure, not a network outage.
-A conflicting duplicate stops consumption without changing the existing row.
+Amount and currency conflicts are logged and acknowledged without changing the row,
+and the listener continues. Direct PostgreSQL tests verify each compared field,
+identical duplicates, metadata-only differences and preservation of all row columns.
 Application unit tests cover mapping, validation, and storage-error propagation.
 Rule tests cover positive/zero/negative amounts, exact currency matching, missing
 values, and all eight valid/invalid combinations of the three business rules.

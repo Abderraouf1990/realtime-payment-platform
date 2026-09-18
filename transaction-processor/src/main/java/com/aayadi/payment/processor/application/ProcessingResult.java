@@ -8,6 +8,9 @@ public sealed interface ProcessingResult {
     record Accepted(LedgerStore.Outcome outcome) implements ProcessingResult {
         public Accepted {
             Objects.requireNonNull(outcome);
+            if (outcome == LedgerStore.Outcome.CONFLICT) {
+                throw new IllegalArgumentException("A payload conflict is a rejection");
+            }
         }
     }
 

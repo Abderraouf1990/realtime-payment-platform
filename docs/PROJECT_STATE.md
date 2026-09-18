@@ -24,7 +24,7 @@ Updated: 2026-09-18
   transactional JDBC ledger store. Pure `TransactionRules` require positive amounts,
   exactly EUR, and TRANSFER before persistence. `ProcessingResult` distinguishes
   acceptance from business rejection; all rejection reasons are accumulated.
-  Rejections never call the ledger store and are logged with transaction/correlation
+  Rejections never write to the ledger and are logged with transaction/correlation
   IDs before normal listener return permits acknowledgement. They are not durable.
   Explicit JSON deserialization ignores Java type headers. Consumer group and topic
   are configurable, with local defaults.
@@ -45,6 +45,16 @@ Updated: 2026-09-18
   permissions. Surefire/Failsafe reports are uploaded only on failure.
 
 ## Validated State
+
+- 2026-09-18: `.\mvnw.cmd -o -pl transaction-processor -am test` passed all 38 tests
+  (no failures or skips) after explicit payload-conflict handling. Unit tests cover
+  all four business fields, combined differences, numeric amount equality and
+  conversion of a post-insert conflict to a business rejection. PostgreSQL tests
+  verify exact/metadata-only duplicates, each field conflict and unchanged rows.
+  Kafka tests verify amount/currency conflicts are logged with transactionId,
+  correlationId and reason=PAYLOAD_CONFLICT, acknowledged, and do not stop consumption.
+  Commit-failure rollback and replay still pass. API, shared contract and schema
+  migrations are unchanged. Conflict history remains log-only, not a durable audit.
 
 - 2026-09-18: `.\mvnw.cmd -o -pl transaction-processor -am test` passed all 34 tests
   (no failures or skips). The dedicated exact-duplicate publication test verifies
@@ -120,7 +130,7 @@ Commands used (from the root, PowerShell):
 
 See [ADR 0001](adr/0001-transaction-intake-contract.md) and
 [ADR 0002](adr/0002-ledger-consumption.md) and
-[ADR 0003](adr/0003-business-rejections.md).
+[ADR 0003](adr/0003-business-rejections.md) and [ADR 0004](adr/0004-payload-conflicts.md).
 
 - `Idempotency-Key` must equal the client-supplied `transactionId`; Kafka uses that
   ID as its record key. This does not guarantee ordering across an account.
@@ -136,9 +146,15 @@ See [ADR 0001](adr/0001-transaction-intake-contract.md) and
   and compares business fields for duplicates. The named PostgreSQL unique constraint
   is the final guarantee; unrelated database errors are not swallowed. Correlation
   and timestamps are excluded from comparison; first committed metadata is retained.
+- After envelope validation, a targeted payload read classifies existing IDs before
+  new-transaction rules. Equal business values return DUPLICATE; changed account,
+  amount, currency or type returns a rejection with PAYLOAD_CONFLICT. The same pure
+  comparison runs after an insert loses a race. No existing columns are replaced.
+  Conflicts log incoming transaction/correlation IDs and reason=PAYLOAD_CONFLICT;
+  normal listener return permits acknowledgement. Conflict history is not durable.
 - Kafka auto-commit is disabled; RECORD acknowledgement follows committed database
   work or verified duplication for accepted events. Business rejections are temporarily
-  logged and acknowledged without ledger access. Technical/contract failures stop
+  logged and acknowledged without ledger writes. Technical/contract failures stop
   the listener without skipping records.
   Recovery requires correcting the failure and restarting; no retry/DLQ topics exist.
   This is at-least-once delivery with idempotent database effects.

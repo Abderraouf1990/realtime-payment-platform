@@ -8,7 +8,7 @@ import java.util.List;
 /** Pure, deterministic rules; all violations are returned in rule order. */
 public final class TransactionRules {
     public enum RejectionReason {
-        AMOUNT_NOT_POSITIVE, CURRENCY_NOT_EUR, TYPE_NOT_TRANSFER
+        AMOUNT_NOT_POSITIVE, CURRENCY_NOT_EUR, TYPE_NOT_TRANSFER, PAYLOAD_CONFLICT
     }
 
     public List<RejectionReason> validate(BigDecimal amount, String currency, TransactionType type) {

@@ -2,6 +2,8 @@ package com.aayadi.payment.processor;
 
 import com.aayadi.payment.contracts.v1.TransactionReceived;
 import com.aayadi.payment.contracts.v1.TransactionType;
+import com.aayadi.payment.processor.application.LedgerStore;
+import com.aayadi.payment.processor.domain.LedgerEntry;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -39,6 +41,33 @@ class ProcessorKafkaIntegrationTests {
     @Autowired private KafkaContainer kafka;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private KafkaListenerEndpointRegistry registry;
+    @Autowired private LedgerStore store;
+
+    @Test
+    void postgresComparesAfterInsertConflictWithoutChangingExistingRow() {
+        var now = Instant.parse("2026-09-18T10:00:00Z");
+        var original = new LedgerEntry("TX-STORE", "CORR-FIRST", "ACC-1", new BigDecimal("10.00"),
+                "EUR", TransactionType.TRANSFER, now, now);
+        assertThat(store.save(original)).isEqualTo(LedgerStore.Outcome.INSERTED);
+        var row = jdbc.queryForMap("SELECT * FROM ledger_transactions WHERE transaction_id = 'TX-STORE'");
+        assertThat(store.save(original)).isEqualTo(LedgerStore.Outcome.DUPLICATE);
+        assertThat(store.save(new LedgerEntry("TX-STORE", "CORR-NEW", "ACC-1", new BigDecimal("10.0"),
+                "EUR", TransactionType.TRANSFER, now.plusSeconds(1), now.plusSeconds(2))))
+                .isEqualTo(LedgerStore.Outcome.DUPLICATE);
+        for (var changed : new LedgerEntry[] {
+                new LedgerEntry("TX-STORE", "CORR-NEW", "ACC-2", original.amount(), "EUR", original.type(), now, now),
+                new LedgerEntry("TX-STORE", "CORR-NEW", "ACC-1", new BigDecimal("11.00"), "EUR", original.type(), now, now),
+                new LedgerEntry("TX-STORE", "CORR-NEW", "ACC-1", original.amount(), "USD", original.type(), now, now)}) {
+            assertThat(store.save(changed)).isEqualTo(LedgerStore.Outcome.CONFLICT);
+            assertThat(jdbc.queryForMap("SELECT * FROM ledger_transactions WHERE transaction_id = 'TX-STORE'")).isEqualTo(row);
+        }
+        // Test-only historical value: do not extend the shared wire enum to simulate another type.
+        jdbc.update("UPDATE ledger_transactions SET type = 'OTHER' WHERE transaction_id = 'TX-STORE'");
+        var historical = jdbc.queryForMap("SELECT * FROM ledger_transactions WHERE transaction_id = 'TX-STORE'");
+        assertThat(store.save(original)).isEqualTo(LedgerStore.Outcome.CONFLICT);
+        assertThat(jdbc.queryForMap("SELECT * FROM ledger_transactions WHERE transaction_id = 'TX-STORE'")).isEqualTo(historical);
+        assertThat(count("TX-STORE")).isEqualTo(1);
+    }
 
     @Test
     void publishingExactlyTheSameEventTwiceCreatesOneLedgerRow(CapturedOutput output) throws Exception {
@@ -128,9 +157,17 @@ class ProcessorKafkaIntegrationTests {
             });
 
             long conflict = send(producer, event("TX-INTEGRATION", "CORR-CONFLICT", "999.00"));
-            await().atMost(Duration.ofSeconds(15)).until(() -> !listener.isRunning());
-            assertThat(committed(admin)).isEqualTo(conflict);
+            await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> assertThat(committed(admin)).isEqualTo(conflict + 1));
+            assertThat(listener.isRunning()).isTrue();
             assertThat(jdbc.queryForMap("SELECT * FROM ledger_transactions WHERE transaction_id = ?", event.transactionId())).isEqualTo(row);
+            var changedCurrency = new TransactionReceived(1, event.transactionId(), "CORR-USD", event.accountId(),
+                    event.amount(), "USD", event.type(), event.receivedAt());
+            long currencyConflict = send(producer, changedCurrency);
+            await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> assertThat(committed(admin)).isEqualTo(currencyConflict + 1));
+            assertThat(count(event.transactionId())).isEqualTo(1);
+            assertThat(jdbc.queryForMap("SELECT * FROM ledger_transactions WHERE transaction_id = ?", event.transactionId())).isEqualTo(row);
+            assertThat(output.getOut()).contains("transactionId=TX-INTEGRATION correlationId=CORR-CONFLICT reason=PAYLOAD_CONFLICT",
+                    "transactionId=TX-INTEGRATION correlationId=CORR-USD reason=PAYLOAD_CONFLICT");
             assertThat(output.getOut()).contains("correlationId=CORR-INTEGRATION", "correlationId=CORR-RETRY", "correlationId=CORR-FAIL");
             assertThat(output.getAll()).doesNotContain("PRIVATE-ACCOUNT");
         }
