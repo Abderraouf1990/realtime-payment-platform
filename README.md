@@ -113,7 +113,10 @@ No retry topic or DLQ is introduced. See [ADR 0003](docs/adr/0003-business-rejec
 
 `ProcessTransaction` maps the event to a ledger entry and supplies `processed_at`
 from an injected UTC clock. A transactional JDBC adapter inserts it using
-`ON CONFLICT (transaction_id) DO NOTHING`. Identical business payloads are successful
+`ON CONFLICT ON CONSTRAINT uk_ledger_transactions_transaction_id DO NOTHING`.
+The PostgreSQL unique constraint is the final guarantee, with no check-before-insert
+race. Only this constraint's conflict is handled as an expected duplicate; other
+database errors propagate. Identical business payloads are successful
 duplicates; differences in account, amount, currency, or type fail processing.
 Correlation and timestamps are metadata: duplicates retain the first stored values,
 while processing logs include each incoming correlation ID. Logs exclude account
@@ -254,9 +257,13 @@ Run all processor tests, including Spring startup and Kafka-to-ledger integratio
 .\mvnw.cmd -pl transaction-processor -am test
 ```
 
-The Kafka + PostgreSQL test checks persisted fields and correlation logs, ignores
-spoofed Java type headers, verifies duplicate handling, and injects a SQL failure
-to prove the offset remains uncommitted before successful replay on listener restart.
+The Kafka + PostgreSQL tests check persisted fields and correlation logs and ignore
+spoofed Java type headers. A dedicated test publishes exactly the same event twice,
+waits for both offsets to be committed, and verifies exactly one ledger row plus
+INSERTED/DUPLICATE outcomes with the listener still running.
+A deferred constraint trigger injects a PostgreSQL failure at COMMIT, after INSERT
+succeeds, proving rollback with no offset advancement before successful replay on
+listener restart. This tests a database commit failure, not a network outage.
 A conflicting duplicate stops consumption without changing the existing row.
 Application unit tests cover mapping, validation, and storage-error propagation.
 Rule tests cover positive/zero/negative amounts, exact currency matching, missing
@@ -264,6 +271,9 @@ values, and all eight valid/invalid combinations of the three business rules.
 The Kafka test also verifies that a combined rejection creates no ledger row,
 advances the offset, logs both IDs and reason codes without account data, and leaves
 the listener able to process subsequent events.
+Concurrent duplicate delivery and a process crash between database commit and
+Kafka offset commit are not directly tested. The guarantees are at-least-once
+consumption and idempotent ledger persistence, not exactly-once processing.
 
 Run focused unit and MVC tests without Docker:
 

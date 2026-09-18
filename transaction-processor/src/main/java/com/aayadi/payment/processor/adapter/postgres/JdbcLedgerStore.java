@@ -22,7 +22,7 @@ public class JdbcLedgerStore implements LedgerStore {
                 INSERT INTO ledger_transactions
                     (transaction_id, correlation_id, account_id, amount, currency, type, received_at, processed_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (transaction_id) DO NOTHING
+                ON CONFLICT ON CONSTRAINT uk_ledger_transactions_transaction_id DO NOTHING
                 """, entry.transactionId(), entry.correlationId(), entry.accountId(), entry.amount(),
                 entry.currency(), entry.type().name(), entry.receivedAt().atOffset(ZoneOffset.UTC),
                 entry.processedAt().atOffset(ZoneOffset.UTC));

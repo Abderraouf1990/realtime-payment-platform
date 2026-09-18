@@ -46,6 +46,15 @@ Updated: 2026-09-18
 
 ## Validated State
 
+- 2026-09-18: `.\mvnw.cmd -o -pl transaction-processor -am test` passed all 34 tests
+  (no failures or skips). The dedicated exact-duplicate publication test verifies
+  two acknowledged Kafka records produce exactly one ledger row, with INSERTED then
+  DUPLICATE and no consumer failure. A deferred constraint trigger now injects a
+  failure at PostgreSQL COMMIT: rollback leaves no row and no advanced Kafka offset;
+  removing the trigger and restarting the listener successfully replays the event.
+  SQL explicitly targets the existing named unique constraint; Flyway V1 is unchanged.
+  These are at-least-once/idempotent-ledger guarantees, not exactly-once processing.
+
 - 2026-09-18: `.\mvnw.cmd -o -pl transaction-processor -am test` passed all 33 tests
   after business-rule separation (no failures or skips). Unit coverage includes all
   eight rule combinations, positive boundaries, zero/negative/missing amounts, exact
@@ -123,7 +132,9 @@ See [ADR 0001](adr/0001-transaction-intake-contract.md) and
   or reject changed payloads under an existing ID. There is no exactly-once claim.
 - PostgreSQL now enforces a unique `transaction_id` through
   `uk_ledger_transactions_transaction_id`. The transactional JDBC adapter uses
-  `ON CONFLICT DO NOTHING` and compares business fields for duplicates. Correlation
+  `ON CONFLICT ON CONSTRAINT uk_ledger_transactions_transaction_id DO NOTHING`
+  and compares business fields for duplicates. The named PostgreSQL unique constraint
+  is the final guarantee; unrelated database errors are not swallowed. Correlation
   and timestamps are excluded from comparison; first committed metadata is retained.
 - Kafka auto-commit is disabled; RECORD acknowledgement follows committed database
   work or verified duplication for accepted events. Business rejections are temporarily
@@ -143,7 +154,7 @@ See [ADR 0001](adr/0001-transaction-intake-contract.md) and
   events; currently technical/contract failures stop consumption. Add listener
   health monitoring: the application process can remain alive after the listener stops.
 - Add concurrent duplicate tests, process-crash testing,
-  and a combined HTTP-to-ledger test. SQL failure/restart is tested, not a database
+  and a combined HTTP-to-ledger test. PostgreSQL commit failure/restart is tested, not a database
   network outage or a crash between database and offset commits.
 - Add authentication, status lookup,
   distributed traces, business metrics, and operational dashboards. The event field

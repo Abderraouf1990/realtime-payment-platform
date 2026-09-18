@@ -14,6 +14,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.annotation.Import;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.testcontainers.kafka.KafkaContainer;
@@ -31,12 +32,33 @@ import static org.awaitility.Awaitility.await;
 @SpringBootTest(properties = "spring.kafka.consumer.group-id=processor-integration")
 @Import(TestcontainersConfiguration.class)
 @ExtendWith(OutputCaptureExtension.class)
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
 class ProcessorKafkaIntegrationTests {
     private static final String TOPIC = "transactions.received";
     private static final String GROUP = "processor-integration";
     @Autowired private KafkaContainer kafka;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private KafkaListenerEndpointRegistry registry;
+
+    @Test
+    void publishingExactlyTheSameEventTwiceCreatesOneLedgerRow(CapturedOutput output) throws Exception {
+        try (var producer = new KafkaProducer<String, String>(Map.of("bootstrap.servers", kafka.getBootstrapServers()),
+                new StringSerializer(), new StringSerializer());
+             var admin = Admin.create(Map.of("bootstrap.servers", kafka.getBootstrapServers()))) {
+            var event = event("TX-IDENTICAL", "CORR-IDENTICAL", "42.00");
+            long first = send(producer, event);
+            long second = send(producer, event);
+            assertThat(second).isEqualTo(first + 1);
+            await().atMost(Duration.ofSeconds(30)).untilAsserted(() ->
+                    assertThat(committed(admin)).isEqualTo(second + 1));
+            assertThat(count(event.transactionId())).isEqualTo(1);
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM ledger_transactions", Integer.class)).isEqualTo(1);
+            assertThat(registry.getListenerContainer("transaction-received").isRunning()).isTrue();
+            assertThat(output.getOut()).contains("transactionId=TX-IDENTICAL outcome=INSERTED",
+                    "transactionId=TX-IDENTICAL outcome=DUPLICATE");
+            assertThat(output.getAll()).doesNotContain("Ledger processing failed", "PRIVATE-ACCOUNT");
+        }
+    }
 
     @Test
     void persistsBeforeCommitDeduplicatesAndReplaysAfterDatabaseFailure(CapturedOutput output) throws Exception {
@@ -76,13 +98,29 @@ class ProcessorKafkaIntegrationTests {
             assertThat(output.getOut()).contains("Transaction rejected correlationId=CORR-REJECTED transactionId=TX-REJECTED",
                     "reasons=[AMOUNT_NOT_POSITIVE, CURRENCY_NOT_EUR, TYPE_NOT_TRANSFER]");
 
-            jdbc.execute("ALTER TABLE ledger_transactions ADD CONSTRAINT test_storage_failure CHECK (transaction_id <> 'TX-FAIL')");
+            // Deferred constraint trigger: INSERT succeeds; the database rejects COMMIT itself.
+            jdbc.execute("""
+                    CREATE FUNCTION test_fail_ledger_commit() RETURNS trigger LANGUAGE plpgsql AS $$
+                    BEGIN
+                        IF NEW.transaction_id = 'TX-FAIL' THEN
+                            RAISE EXCEPTION 'Injected ledger commit failure' USING ERRCODE = '23514';
+                        END IF;
+                        RETURN NEW;
+                    END;
+                    $$
+                    """);
+            jdbc.execute("""
+                    CREATE CONSTRAINT TRIGGER test_storage_failure
+                    AFTER INSERT ON ledger_transactions DEFERRABLE INITIALLY DEFERRED
+                    FOR EACH ROW EXECUTE FUNCTION test_fail_ledger_commit()
+                    """);
             long failed = send(producer, event("TX-FAIL", "CORR-FAIL", "10.00"));
             await().atMost(Duration.ofSeconds(15)).until(() -> !listener.isRunning());
             assertThat(committed(admin)).isEqualTo(failed);
             assertThat(count("TX-FAIL")).isZero();
 
-            jdbc.execute("ALTER TABLE ledger_transactions DROP CONSTRAINT test_storage_failure");
+            jdbc.execute("DROP TRIGGER test_storage_failure ON ledger_transactions");
+            jdbc.execute("DROP FUNCTION test_fail_ledger_commit()");
             listener.start();
             await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
                 assertThat(count("TX-FAIL")).isEqualTo(1);
