@@ -20,7 +20,10 @@ Updated: 2026-09-18
 - `transaction-processor` depends on `shared-contracts` and Boot's Jackson starter.
   A contract test verifies that its Kafka JSON deserializer preserves correlation
   metadata. Flyway V1 creates `ledger_transactions` in the default application schema.
-  There is no consumer, business validation, or ledger writer yet.
+  The consumer now maps shared events through a plain application service to a
+  transactional JDBC ledger store. It validates version/shape and positive amounts.
+  Explicit JSON deserialization ignores Java type headers. Consumer group and topic
+  are configurable, with local defaults.
 - Flyway's Boot starter, PostgreSQL database support, and PostgreSQL JDBC runtime
   driver were already declared; no duplicate dependencies or POM changes were needed.
 - Ledger columns use a generated BIGINT primary key, a required unique transaction ID,
@@ -38,6 +41,13 @@ Updated: 2026-09-18
   permissions. Surefire/Failsafe reports are uploaded only on failure.
 
 ## Validated State
+
+- 2026-09-18: `.\mvnw.cmd -o -pl transaction-processor -am test` passed all 10 processor
+  tests. New application unit tests cover mapping, validation and storage failures.
+  Kafka + PostgreSQL integration verifies persisted fields and correlation logging,
+  spoofed Java type headers, identical duplicates, SQL failure without offset
+  advancement, replay after listener restart, and conflicting duplicate failure.
+  API, shared contracts, and Flyway V1 are unchanged.
 
 - 2026-09-18: `.\mvnw.cmd -o -pl transaction-processor -am test` passed all 6 processor
   tests, including 4 new PostgreSQL 17.6/Testcontainers migration tests. They prove
@@ -87,7 +97,8 @@ Commands used (from the root, PowerShell):
 
 ## Architecture Decisions
 
-See [ADR 0001](adr/0001-transaction-intake-contract.md).
+See [ADR 0001](adr/0001-transaction-intake-contract.md) and
+[ADR 0002](adr/0002-ledger-consumption.md).
 
 - `Idempotency-Key` must equal the client-supplied `transactionId`; Kafka uses that
   ID as its record key. This does not guarantee ordering across an account.
@@ -98,19 +109,28 @@ See [ADR 0001](adr/0001-transaction-intake-contract.md).
 - Repeated requests can publish duplicate events. The API does not store requests
   or reject changed payloads under an existing ID. There is no exactly-once claim.
 - PostgreSQL now enforces a unique `transaction_id` through
-  `uk_ledger_transactions_transaction_id`. Transactional processing, duplicate payload
-  conflict handling, and acknowledgement ordering still require implementation.
+  `uk_ledger_transactions_transaction_id`. The transactional JDBC adapter uses
+  `ON CONFLICT DO NOTHING` and compares business fields for duplicates. Correlation
+  and timestamps are excluded from comparison; first committed metadata is retained.
+- Kafka auto-commit is disabled; RECORD acknowledgement follows committed database
+  work or verified duplication. Failures stop the listener without skipping records.
+  Recovery requires correcting the failure and restarting; no retry/DLQ topics exist.
+  This is at-least-once delivery with idempotent database effects.
 - Amount sign and supported-currency checks belong to the processor. An intake 202
   confirms publication, not business validation or accounting completion.
 - Normal startup requires an externally provisioned topic. The test launcher and
-  integration configuration create a disposable three-partition, one-replica topic.
+  API integration configuration create a disposable three-partition topic; processor
+  integration configuration uses one partition. Both use one replica.
 
 ## Current Gaps and Known Build Notes
 
-- Implement the consumer and ledger writer against the migrated schema.
-- Define recovery, retry, poison-message, and rejection handling; test duplicate
-  delivery, restart, and database outage without premature Kafka acknowledgement.
-- Add authentication, status lookup, consumer-side correlation propagation and logging,
+- Define durable business rejection and operational recovery for invalid events;
+  currently failures stop consumption until operator intervention. Add listener
+  health monitoring: the application process can remain alive after the listener stops.
+- Add supported-currency rules, concurrent duplicate tests, process-crash testing,
+  and a combined HTTP-to-ledger test. SQL failure/restart is tested, not a database
+  network outage or a crash between database and offset commits.
+- Add authentication, status lookup,
   distributed traces, business metrics, and operational dashboards. The event field
   supplies correlation metadata; it does not itself implement distributed tracing.
 - Spring Boot manages JUnit Jupiter 6.0.1, required by Spring Framework 7. The JUnit 5
@@ -122,20 +142,13 @@ See [ADR 0001](adr/0001-transaction-intake-contract.md).
 
 ## Next Objective
 
-Complete the walking skeleton: consume `TransactionReceived` and persist valid
-transactions idempotently in PostgreSQL using the V1 schema, with pinned-container
-integration tests for processing and recovery.
+Define and implement durable accepted/rejected business outcomes so an invalid
+transaction does not require manual intervention or indefinitely block consumption.
 
 ## Acceptance Criteria for the Next Objective
 
-- Version-1 events deserialize through an explicit consumer contract.
-- Consumer processing and any derived events preserve the incoming `correlationId`.
-- Deterministic business rules produce documented accepted/rejected outcomes.
-- Use the existing Flyway ledger schema and unique constraint on `transaction_id`.
-- Duplicate events create one ledger entry; changed-payload duplicates have a
-  documented, tested outcome.
-- Database work commits before Kafka acknowledgement; database failures remain
-  retryable without losing the event.
-- Integration tests demonstrate API-to-ledger flow, duplicates, and recovery.
-- The API never accesses the ledger database. Documentation records only guarantees
-  demonstrated by tests.
+- Document supported currencies, rejection reasons, and conflict policy in an ADR.
+- Persist outcomes idempotently and preserve correlation metadata without changing
+  the API's database isolation or acknowledging before durable completion.
+- Test valid and rejected HTTP-to-ledger flows, repeated delivery, and recovery.
+- Expose stopped-consumer health and document the operator recovery procedure.

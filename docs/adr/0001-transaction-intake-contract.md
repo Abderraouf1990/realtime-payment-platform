@@ -2,7 +2,8 @@
 
 Date: 2026-09-17
 
-Status: Accepted for the initial intake slice; durable deduplication remains unimplemented.
+Status: Accepted for the initial intake slice. Processor implementation status and
+deduplication guarantees below are superseded by [ADR 0002](0002-ledger-consumption.md).
 
 ## Context
 

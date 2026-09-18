@@ -6,9 +6,15 @@ import org.springframework.context.annotation.Bean;
 import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
+import org.apache.kafka.clients.admin.NewTopic;
+import org.springframework.kafka.config.TopicBuilder;
 
 @TestConfiguration(proxyBeanMethods = false)
 class TestcontainersConfiguration {
+	@Bean
+	NewTopic receivedTopic() {
+		return TopicBuilder.name("transactions.received").partitions(1).replicas(1).build();
+	}
 
 	@Bean
 	@ServiceConnection

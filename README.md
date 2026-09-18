@@ -4,8 +4,8 @@ A Java 25 / Spring Boot 4.0.1 payment-processing demonstrator with the intended 
 
 `Transaction API -> Kafka -> Transaction Processor -> PostgreSQL`
 
-The API intake slice and the ledger schema migration are implemented. The processor
-does not yet consume events or write ledger entries; end-to-end idempotency remains pending.
+The API publishes events and the processor consumes them into the PostgreSQL ledger,
+with database-backed deduplication and commit-before-acknowledgement ordering.
 
 ## Modules
 
@@ -13,7 +13,7 @@ does not yet consume events or write ledger entries; end-to-end idempotency rema
 | --- | --- |
 | `shared-contracts` | Framework-free versioned events and shared value types |
 | `transaction-api` | HTTP structural validation and confirmed Kafka publication |
-| `transaction-processor` | Future deterministic validation and idempotent ledger persistence |
+| `transaction-processor` | Kafka consumption, validation, and idempotent ledger persistence |
 
 See [project state](docs/PROJECT_STATE.md), the
 [architecture](docs/architecture/real-time-payment-processing-platform.md), and
@@ -82,8 +82,44 @@ Run the applications on the host in separate terminals:
 .\mvnw.cmd -pl transaction-processor spring-boot:run
 ```
 
-The processor applies its Flyway migrations on startup but has no consumer or ledger
-writer yet. The Testcontainers demo below is an alternative to Compose.
+The processor applies Flyway migrations before consuming events. Its group defaults
+to `transaction-processor-local` (`KAFKA_CONSUMER_GROUP`), and its topic defaults to
+`transactions.received` (`TRANSACTIONS_RECEIVED_TOPIC`). Coordinate topic overrides
+with the API's `payments.kafka.received-topic` property and topic provisioning.
+The Testcontainers intake demo below starts only the API and its own broker; use
+Compose with both host applications for the complete flow.
+
+## Kafka processing and acknowledgement
+
+The listener uses the shared `TransactionReceived` contract. JSON deserialization
+selects that class explicitly and ignores Java type headers. The processor checks
+schema version 1, required fields, ID syntax, positive amounts fitting NUMERIC(17,2),
+and three-letter uppercase currency codes. A supported-currency whitelist and
+durable business rejection outcomes remain future work.
+
+`ProcessTransaction` maps the event to a ledger entry and supplies `processed_at`
+from an injected UTC clock. A transactional JDBC adapter inserts it using
+`ON CONFLICT (transaction_id) DO NOTHING`. Identical business payloads are successful
+duplicates; differences in account, amount, currency, or type fail processing.
+Correlation and timestamps are metadata: duplicates retain the first stored values,
+while processing logs include each incoming correlation ID. Logs exclude account
+data, amounts, raw JSON, and underlying exception details.
+
+Kafka auto-commit is disabled. Spring Kafka `RECORD` acknowledgement commits the
+offset synchronously after the listener returns successfully, which happens only
+after the JDBC transaction has committed (or an identical duplicate was verified).
+Delivery is **at least once**: a crash between database commit and offset commit
+replays the event, and the unique constraint prevents a second ledger entry.
+There is no distributed Kafka/database transaction or exactly-once claim.
+
+Any processing or deserialization failure stops the listener without recovering,
+skipping, or acknowledging the failed record. There are no retry topics or DLQ.
+Correct the underlying problem and restart the processor to replay from the last
+committed offset. The process itself may remain running with its listener stopped;
+an invalid event or conflicting duplicate requires operator intervention and will
+block consumption again on restart. Automated recovery and listener-health
+monitoring are not implemented. A new group starts at the earliest retained event.
+See [ADR 0002](docs/adr/0002-ledger-consumption.md).
 
 ## Ledger schema
 
@@ -103,17 +139,17 @@ and creates `ledger_transactions` in the connection's default application schema
 | `type` | `VARCHAR(32)` | Not null |
 | `received_at`, `processed_at` | `TIMESTAMPTZ` | Not null |
 
-`processed_at` must be supplied by the future processor when recording the result.
+`processed_at` is supplied by the processor when recording the result.
 Timestamps represent instants; PostgreSQL retains microsecond precision, not the
-original timezone offset. Amount positivity and supported-currency rules remain
-part of future business validation.
+original timezone offset. The processor enforces amount positivity; supported-currency
+rules remain future work.
 
 The primary key and unique constraint supply their own indexes. The only additional
 index is `(account_id, received_at DESC)` for account-history queries. No duplicate
 index on `transaction_id` or speculative per-column indexes are added.
 
 The unique constraint prevents duplicate transaction IDs at the database boundary;
-consumer retries, conflict handling, and acknowledgement ordering are not implemented.
+the consumer also compares duplicate business payloads before acknowledging them.
 Once applied, keep V1 unchanged and introduce subsequent schema changes as V2, V3, etc.
 
 ## Run the intake demo
@@ -168,8 +204,9 @@ endpoint yet.
   Missing, blank, or malformed correlation IDs return 400 without publication.
 - `amount` is decimal with at most 15 integer and 2 fractional digits. Currency is
   three uppercase letters; `TRANSFER` is the only current transaction type.
-- Sign checks and supported-currency business rules belong to the future processor.
-  A structurally valid negative amount can therefore receive 202 at intake.
+- Sign checks belong to the processor; supported-currency rules remain future work.
+  A structurally valid negative amount can receive 202 at intake and subsequently
+  stop the processor. There is no durable rejection outcome yet.
 - Retry with the same ID, key, and payload. Retries may publish multiple events.
   Reusing an ID with a changed payload is not detected across requests yet.
 
@@ -195,11 +232,17 @@ Run the PostgreSQL migration integration tests (Docker required; no Kafka needed
 The pinned `postgres:17.6` container proves Flyway V1 application and repeat-run
 behavior, the default-schema table and unique constraint, generated IDs, exact
 amount/timestamp storage, duplicate rejection (`23505`), and null-ID rejection (`23502`).
-Run all processor tests, including Spring startup, with:
+Run all processor tests, including Spring startup and Kafka-to-ledger integration, with:
 
 ```powershell
 .\mvnw.cmd -pl transaction-processor -am test
 ```
+
+The Kafka + PostgreSQL test checks persisted fields and correlation logs, ignores
+spoofed Java type headers, verifies duplicate handling, and injects a SQL failure
+to prove the offset remains uncommitted before successful replay on listener restart.
+A conflicting duplicate stops consumption without changing the existing row.
+Application unit tests cover mapping, validation, and storage-error propagation.
 
 Run focused unit and MVC tests without Docker:
 
@@ -219,4 +262,4 @@ separated into a Failsafe phase. Kafka is pinned to `4.1.1` and PostgreSQL to `1
 Spring Boot manages JUnit Jupiter 6.0.1, as required by Spring Framework 7, despite
 the older JUnit 5 wording in the project instructions.
 
-Ledger writing, consumer recovery tests, and operational dashboards remain future work.
+Durable rejection handling, automated recovery, and operational dashboards remain future work.
