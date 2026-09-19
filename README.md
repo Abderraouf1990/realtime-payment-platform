@@ -257,7 +257,7 @@ From the repository root in PowerShell:
 .\mvnw.cmd -pl transaction-api spring-boot:test-run
 ```
 
-The test launcher starts `apache/kafka-native:4.1.1`, provisions
+The test launcher starts `apache/kafka:4.1.1`, provisions
 `transactions.received` with three partitions and one replica, and starts the API
 on port 8080. These disposable containers are for local development only.
 
@@ -339,7 +339,7 @@ both report directories on failure, so no workflow change is necessary.
 The dedicated `payment-e2e-tests` module depends on the two application artifacts
 for reactor ordering and runs their executable JARs in separate JVMs. The API's
 runtime classpath has no PostgreSQL dependency. It sends real HTTP requests to a
-random port through Kafka into PostgreSQL, using `apache/kafka-native:4.1.1` and
+random port through Kafka into PostgreSQL, using `apache/kafka:4.1.1` and
 `postgres:17.6`. Its scenarios cover insertion, an identical HTTP retry, a payload
 conflict, negative amount, non-EUR currency, and PostgreSQL server unavailability.
 The outage stops the disposable PostgreSQL server, confirms HTTP intake still
@@ -408,6 +408,12 @@ Run the Kafka publication integration test with Docker:
 The repository's complete validation command remains `.\mvnw.cmd clean verify`.
 Container-backed `*IT` tests run through Failsafe, after packaging the applications.
 Kafka is pinned to `4.1.1` and PostgreSQL to `17.6`.
+
+Testcontainers uses the JVM image `apache/kafka:4.1.1`, matching Compose.
+The native image crashed during setup on the GitHub Ubuntu runner in
+[run 35428956254](https://github.com/Abderraouf1990/realtime-payment-platform/actions/runs/35428956254/job/105863836497).
+Both variants are supported by the
+[Testcontainers Kafka module](https://java.testcontainers.org/modules/kafka/).
 Spring Boot manages JUnit Jupiter 6.0.1, as required by Spring Framework 7, despite
 the older JUnit 5 wording in the project instructions.
 

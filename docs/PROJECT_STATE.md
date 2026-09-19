@@ -43,7 +43,7 @@ Updated: 2026-09-19
   required correlation/account IDs, NUMERIC(17,2), currency/type strings, and required
   TIMESTAMPTZ received/processed instants. Processing time is supplied by the writer.
   The only additional index is `(account_id, received_at DESC)` for account history.
-- Container images are pinned: `apache/kafka-native:4.1.1` and `postgres:17.6`.
+- Container images are pinned: `apache/kafka:4.1.1` and `postgres:17.6`.
 - Root `.gitignore`, README, architecture document, and the first ADR exist.
 - Local Compose infrastructure provides Kafka 4.1.1 (single-node KRaft) and PostgreSQL
   17.6 on loopback ports 9092/5432, with named volumes, healthchecks, and a dedicated
@@ -54,6 +54,17 @@ Updated: 2026-09-19
   permissions. Surefire/Failsafe reports are uploaded only on failure.
 
 ## Validated State
+
+- 2026-09-19: Inspected failed GitHub Actions job
+  [105863836497](https://github.com/Abderraouf1990/realtime-payment-platform/actions/runs/35428956254/job/105863836497)
+  for commit e19d343. The Kafka native container crashes during setup with a
+  SegfaultHandler report in GraalVM's getpwuid/user-property initialization. Both API
+  integration contexts fail to start; processor and E2E modules are skipped.
+  Replaced apache/kafka-native:4.1.1 with the supported JVM image apache/kafka:4.1.1
+  in API, processor and E2E fixtures, matching Compose. Kafka version and test
+  assertions remain unchanged. No local build/tests were run, as requested.
+  Validation of this fix on GitHub Actions remains pending; the workflow still runs
+  the full clean verify lifecycle without disabling tests or increasing timeouts.
 
 - 2026-09-19: Rejection notification focused validation passed with
   `.\mvnw.cmd -pl transaction-processor -am verify`: 38 unit tests and 13 integration

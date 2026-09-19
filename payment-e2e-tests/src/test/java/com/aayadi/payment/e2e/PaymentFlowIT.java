@@ -48,7 +48,7 @@ class PaymentFlowIT {
         scenario = test.getTestMethod().orElseThrow().getName();
         Files.createDirectories(LOGS.resolve(scenario));
         // Register before starting: @AfterEach also runs when this setup fails partway through.
-        kafka = manage(new KafkaContainer("apache/kafka-native:4.1.1"));
+        kafka = manage(new KafkaContainer("apache/kafka:4.1.1"));
         postgres = manage(new PostgreSQLContainer("postgres:17.6"));
         kafka.start();
         postgres.start();
