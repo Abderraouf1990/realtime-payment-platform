@@ -63,8 +63,9 @@ Updated: 2026-09-19
   Replaced apache/kafka-native:4.1.1 with the supported JVM image apache/kafka:4.1.1
   in API, processor and E2E fixtures, matching Compose. Kafka version and test
   assertions remain unchanged. No local build/tests were run, as requested.
-  Validation of this fix on GitHub Actions remains pending; the workflow still runs
-  the full clean verify lifecycle without disabling tests or increasing timeouts.
+  GitHub Actions subsequently passed for commit `2937501`
+  ([run 35462303146](https://github.com/Abderraouf1990/realtime-payment-platform/actions/runs/35462303146));
+  the workflow runs the full clean verify lifecycle without disabling tests or increasing timeouts.
 
 - 2026-09-19: Rejection notification focused validation passed with
   `.\mvnw.cmd -pl transaction-processor -am verify`: 38 unit tests and 13 integration
@@ -269,12 +270,15 @@ and [ADR 0005](adr/0005-durable-business-rejections.md), extended by
 
 ## Next Objective
 
-Design a transactional outbox for rejection notifications to close the durable
-audit-to-publication gap, retaining explicit downstream duplicate handling.
+M1 in [the approved AI and DevSecOps roadmap](ROADMAP.md): containerize transaction-api and transaction-processor and integrate both into Docker Compose.
+
+The user approved deployment before the incident assistant on 2026-09-19. The previous outbox objective is deferred reliability work; its known limitations remain above. Roadmap decision history records this reprioritization.
 
 ## Acceptance Criteria for the Next Objective
 
-- Persist audit and pending notification in one PostgreSQL transaction.
-- Publish pending notifications independently of input retention, with bounded retries
-  and observable backlog; keep the API isolated from PostgreSQL.
-- Define a stable notification identity and test crash windows without exactly-once claims.
+- Build and start the complete platform from a clean clone with documented commands.
+- Application containers run as non-root with external configuration and no embedded secrets.
+- Use container-network Kafka/PostgreSQL addresses and preserve topic initialization and volumes.
+- Demonstrate accepted payment persistence, identical retry without a second ledger row, durable rejection and Kafka rejection notification.
+- Record actual validation commands/results, limitations and the next task; M1 is not yet implemented.
+
