@@ -1,4 +1,59 @@
 services:
+  transaction-api:
+    build:
+      context: .
+      dockerfile: transaction-api/Dockerfile
+    ports:
+      - '127.0.0.1:${API_PORT:-8080}:8080'
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      PAYMENTS_KAFKA_RECEIVED_TOPIC: ${TRANSACTIONS_RECEIVED_TOPIC:-transactions.received}
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    healthcheck:
+      test: ['CMD', 'curl', '--fail', '--silent', '--max-time', '3', 'http://localhost:8080/actuator/health']
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 30s
+    stop_grace_period: 30s
+    networks:
+      - payments
+
+  transaction-processor:
+    build:
+      context: .
+      dockerfile: transaction-processor/Dockerfile
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_CONSUMER_GROUP: ${KAFKA_CONSUMER_GROUP:-transaction-processor-local}
+      TRANSACTIONS_RECEIVED_TOPIC: ${TRANSACTIONS_RECEIVED_TOPIC:-transactions.received}
+      TRANSACTIONS_REJECTED_TOPIC: ${TRANSACTIONS_REJECTED_TOPIC:-transactions.rejected}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-payments}
+      POSTGRES_USER: ${POSTGRES_USER:-payments}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-payments_dev_only}
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    stop_grace_period: 30s
+    networks:
+      - payments
+
   kafka:
     image: apache/kafka:4.1.1
     ports:

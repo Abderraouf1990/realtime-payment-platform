@@ -11,7 +11,7 @@ Build practical AI engineering expertise and demonstrate senior DevSecOps capabi
 - Maven multi-module build
 - Apache Kafka
 - PostgreSQL and Flyway
-- JUnit 5 and Testcontainers
+- JUnit Jupiter 6 (Spring Boot managed) and Testcontainers
 - Spring Boot Actuator
 - Docker Compose for local development
 - GitHub Actions for CI
@@ -21,6 +21,7 @@ Build practical AI engineering expertise and demonstrate senior DevSecOps capabi
 - `shared-contracts`: versioned event contracts and shared value types only.
 - `transaction-api`: REST API, request validation, idempotency-key handling, and Kafka event publication.
 - `transaction-processor`: Kafka event consumption, deterministic business validation, and idempotent ledger persistence.
+- `payment-e2e-tests`: black-box tests of the packaged applications with Kafka and PostgreSQL.
 
 ## Architecture Rules
 

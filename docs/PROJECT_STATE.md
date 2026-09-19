@@ -44,16 +44,46 @@ Updated: 2026-09-19
   TIMESTAMPTZ received/processed instants. Processing time is supplied by the writer.
   The only additional index is `(account_id, received_at DESC)` for account history.
 - Container images are pinned: `apache/kafka:4.1.1` and `postgres:17.6`.
-- Root `.gitignore`, README, architecture document, and the first ADR exist.
-- Local Compose infrastructure provides Kafka 4.1.1 (single-node KRaft) and PostgreSQL
-  17.6 on loopback ports 9092/5432, with named volumes, healthchecks, and a dedicated
-  network. `.env.example` contains development defaults. Host Spring applications
-  use environment-configurable connections; only the processor connects to the database.
+- Root `.gitignore`, README, architecture document, roadmap and versioned ADRs exist.
+- Compose builds and runs both applications from sources through multi-stage Dockerfiles
+  with digest-pinned Temurin 25 JDK/JRE bases. UID/GID 10001, read-only application root
+  filesystems, /tmp tmpfs, dropped capabilities and no-new-privileges are configured.
+  The build context allowlist excludes .env, Git metadata and host targets.
+  Kafka 4.1.1 and PostgreSQL 17.6 retain their named volumes and loopback ports.
+  API HTTP binds to loopback 8080 (API_PORT); internal connections use kafka:29092 and
+  postgres:5432. Only the processor receives database settings. Topic initialization
+  gates both applications and PostgreSQL health gates the processor.
+  API Actuator health is checked; the non-web processor has no HTTP healthcheck.
+  A running processor container is not a guarantee of listener health.
 - GitHub Actions CI runs `./mvnw clean verify` on pushes and pull requests targeting
   `main` and `codex/build-mvp`, using Temurin 25, Maven caching, and read-only contents
   permissions. Surefire/Failsafe reports are uploaded only on failure.
 
 ## Validated State
+
+- 2026-09-19 (M1): Checked AGENTS.md/ROADMAP.md against module POMs, processor ordering
+  and Compose. Corrected JUnit wording to Boot-managed Jupiter 6 and documented the
+  E2E module. Implemented Dockerfiles, a source-only Docker context, application
+  Compose services and scripts/verify-compose.ps1; business code is unchanged.
+  Built from a temporary export of tracked/new source files with no .git, .env,
+  target directories or prebuilt JARs. `docker compose -p payments-m1-validation build`
+  succeeded without a host Maven build. The acceptance script then rebuilt and ran
+  in its own disposable project with random loopback ports and exited 0:
+  `PASS: non-root, HTTP acceptance, idempotent retry, durable rejection, Kafka notification, volumes and restart.`
+  It verified UID 10001 for both apps, no database environment in the API, one immutable
+  ledger row after identical HTTP retry, negative rejection only in the audit, and a
+  versioned rejection notification with transactionId key/correlation/reasons.
+  After down/up with named volumes retained, ledger/audit rows survived and a new
+  payment was processed. Finally removed only its temporary containers/network/volumes.
+  The first run exposed a missing curl executable in the JRE image; the API Dockerfile
+  now installs it and the full exercise passed on rerun. `docker compose --env-file
+  .env.example config --quiet` also passed. Local evidence logs are
+  `%TEMP%/payments-m1-build.log` and `%TEMP%/payments-m1-smoke.log`.
+  `.\mvnw.cmd clean verify` then passed in 4m35s: 74 Surefire tests and 20 Failsafe
+  tests (including five real-JAR E2E scenarios), with no failures, errors or skips.
+  Its log is `%TEMP%/payments-m1-clean-verify.log`. Packaging and runtime use the same
+  application sources; no business logic or acknowledgement policy was changed.
+  No CI run or image publication is claimed for these uncommitted M1 changes.
 
 - 2026-09-19: Inspected failed GitHub Actions job
   [105863836497](https://github.com/Abderraouf1990/realtime-payment-platform/actions/runs/35428956254/job/105863836497)
@@ -190,7 +220,7 @@ the existing cache; Docker pulled the pinned images as needed.
   and partition.
 - The integration test exposed a producer-listener generic type mismatch with Boot
   auto-configuration; this was fixed and the test passed on rerun.
-- The processor context test now passes with Flyway V1 applied automatically on startup.
+- The processor context test applies Flyway V1 and V2 automatically on startup.
 - Earlier milestones deliberately skipped `clean verify`; the end-to-end milestone
   now requests the full lifecycle. See the latest validation entry for its result.
 
@@ -208,7 +238,8 @@ See [ADR 0001](adr/0001-transaction-intake-contract.md) and
 [ADR 0002](adr/0002-ledger-consumption.md) and
 [ADR 0003](adr/0003-business-rejections.md), [ADR 0004](adr/0004-payload-conflicts.md),
 and [ADR 0005](adr/0005-durable-business-rejections.md), extended by
-[ADR 0006](adr/0006-rejection-notifications.md).
+[ADR 0006](adr/0006-rejection-notifications.md). Local application containers follow
+[ADR 0007](adr/0007-containerized-local-platform.md).
 
 - `Idempotency-Key` must equal the client-supplied `transactionId`; Kafka uses that
   ID as its record key. This does not guarantee ordering across an account.
@@ -260,8 +291,8 @@ and [ADR 0005](adr/0005-durable-business-rejections.md), extended by
 - Add authentication, status lookup,
   distributed traces, business metrics, and operational dashboards. The event field
   supplies correlation metadata; it does not itself implement distributed tracing.
-- Spring Boot manages JUnit Jupiter 6.0.1, required by Spring Framework 7. The JUnit 5
-  wording in `AGENTS.md` is incompatible with that stack; dependencies were not downgraded.
+- Spring Boot manages JUnit Jupiter 6.0.1, required by Spring Framework 7. AGENTS.md
+  now reflects the actual version and includes the payment-e2e-tests module.
 - Failsafe is active in `integration-test` / `verify` for `*IT` tests. All container
   tests were renamed; Surefire retains unit/MVC/contract tests. CI already invokes
   `clean verify` and collects both report directories on failure.
@@ -270,15 +301,19 @@ and [ADR 0005](adr/0005-durable-business-rejections.md), extended by
 
 ## Next Objective
 
-M1 in [the approved AI and DevSecOps roadmap](ROADMAP.md): containerize transaction-api and transaction-processor and integrate both into Docker Compose.
+M2 in [the approved AI and DevSecOps roadmap](ROADMAP.md): implement a secure image-delivery
+pipeline for the two application images (tests, code/dependency/secret analysis, image
+scans, SBOM and commit-traceable GHCR delivery), with documented blocking rules.
 
-The user approved deployment before the incident assistant on 2026-09-19. The previous outbox objective is deferred reliability work; its known limitations remain above. Roadmap decision history records this reprioritization.
+M1 is completed locally; the prior green CI remains specific to commit 2937501.
+The outbox stays deferred per the approved roadmap. No push/publication is authorized
+by this state update; retain the user's confirmation requirement.
 
 ## Acceptance Criteria for the Next Objective
 
-- Build and start the complete platform from a clean clone with documented commands.
-- Application containers run as non-root with external configuration and no embedded secrets.
-- Use container-network Kafka/PostgreSQL addresses and preserve topic initialization and volumes.
-- Demonstrate accepted payment persistence, identical retry without a second ledger row, durable rejection and Kafka rejection notification.
-- Record actual validation commands/results, limitations and the next task; M1 is not yet implemented.
+- Keep clean verify and exercise image construction/Compose acceptance in CI.
+- Run code, dependency, secret and image analysis with explicit failure thresholds.
+- Generate SBOMs and associate both images with their source commit.
+- Prepare minimally privileged GHCR publication; validate delivery only after authorized publication.
+- Record measured results, blocking findings and justified exceptions without claiming production readiness.
 

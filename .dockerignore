@@ -1,0 +1,24 @@
+# Allow only Maven build inputs. Host artifacts, Git data and .env never enter the context.
+**
+!pom.xml
+!mvnw
+!.mvn/
+!.mvn/wrapper/
+!.mvn/wrapper/maven-wrapper.properties
+!shared-contracts/
+!shared-contracts/pom.xml
+!shared-contracts/src/
+!shared-contracts/src/main/
+!shared-contracts/src/main/**
+!transaction-api/
+!transaction-api/pom.xml
+!transaction-api/src/
+!transaction-api/src/main/
+!transaction-api/src/main/**
+!transaction-processor/
+!transaction-processor/pom.xml
+!transaction-processor/src/
+!transaction-processor/src/main/
+!transaction-processor/src/main/**
+!payment-e2e-tests/
+!payment-e2e-tests/pom.xml

@@ -11,8 +11,8 @@ Build practical expertise in AI engineering and demonstrate senior DevSecOps cap
 | ID | Milestone | Status | Acceptance evidence |
 | --- | --- | --- | --- |
 | M0 | Payment walking skeleton and reliability baseline | Completed baseline | Ledger, durable rejections, Kafka notifications and E2E; CI passed for 2937501. Known limitations remain in PROJECT_STATE.md. |
-| M1 | Containerize API and processor | Next | From a clean clone, build and start the complete Compose stack; demonstrate accepted payment, duplicate, durable rejection and rejection event. Non-root applications, external configuration, no embedded secrets. |
-| M2 | Secure image delivery | Planned | CI tests, code/dependency/secret analysis, image scans, SBOM and GHCR images traceable to commit; document blocking rules and any justified exceptions. |
+| M1 | Containerize API and processor | Completed locally | Source-only image build and scripts/verify-compose.ps1 passed: non-root, accepted payment, duplicate, durable rejection, Kafka event and data retained across down/up. See PROJECT_STATE.md for evidence and CI limits. |
+| M2 | Secure image delivery | Next | CI tests, code/dependency/secret analysis, image scans, SBOM and GHCR images traceable to commit; document blocking rules and any justified exceptions. |
 | M3 | Local Kubernetes deployment | Planned | Reproducible Helm installation, resource requests/limits, restricted workload permissions, injected secrets, meaningful probes, controlled upgrade and rollback exercise. |
 | M4 | Observability and incident exercises | Planned | Structured logs, metrics, distributed traces, listener-state monitoring, dashboards and runbooks; reproduce PostgreSQL outage, Kafka publication failure and malformed input. |
 | M5 | Secure, evaluated incident assistant | Planned | RAG over versioned runbooks/ADRs; read-only incident evidence; sourced structured diagnosis and abstention; 15–20 evaluation cases including prompt injection; measure quality, latency and cost; authenticated access and redaction. |
@@ -20,9 +20,12 @@ Build practical expertise in AI engineering and demonstrate senior DevSecOps cap
 
 M1–M4 prepare the environment and evidence for M5. Keep these milestones bounded: AI must not be postponed indefinitely by additional payment features. Each milestone needs a reproducible demonstration, not a claim of production readiness.
 
-## Current task: M1
+## Current task: M2
 
-Create Dockerfiles for transaction-api and transaction-processor and integrate them into the existing Compose infrastructure. Preserve topic initialization and database volumes. Use container-network addresses for application connections. Document prerequisites and clean-clone commands. Verify accepted, duplicate and rejected transactions through the running containers. Record commands, results and limitations.
+Implement the secure image-delivery pipeline for the two application images: retain tests,
+add code/dependency/secret analysis, image scans and SBOMs, and prepare GHCR publication
+with commit traceability and documented blocking rules. Validate the pipeline before
+claiming M2 complete. Follow the user's existing approval requirement before push or publication.
 
 ## Deferred work
 

@@ -23,7 +23,19 @@ See [project state](docs/PROJECT_STATE.md), the
 
 ## Local infrastructure
 
-From the repository root, with Docker running in Linux-container mode:
+Prerequisites: Git and Docker with Linux containers, BuildKit and Docker Compose v2
+(supporting `up --wait`). Allow at least 4 GB of Docker memory and network access to
+Docker Hub/Maven Central for the first build. No host Java or Maven is needed for
+the containerized stack. From a clean clone:
+
+```sh
+git clone https://github.com/Abderraouf1990/realtime-payment-platform.git
+cd realtime-payment-platform
+git checkout codex/build-mvp
+docker compose up --build -d --wait --wait-timeout 180
+```
+
+After the initial build, use:
 
 ```sh
 docker compose up -d
@@ -32,15 +44,18 @@ docker compose logs -f kafka
 docker compose down
 ```
 
-Wait for Kafka and PostgreSQL to become `healthy` and for `kafka-init` to exit with
-code 0 (`docker compose ps -a`) before starting the applications. Stop following
-logs with Ctrl+C; this does not stop Kafka. Compose runs Kafka 4.1.1 in single-node
-KRaft mode, PostgreSQL 17.6 and a one-shot topic initializer; applications run on the host.
-Ports bind to the host loopback interface: Kafka at `localhost:9092` and PostgreSQL
-at `localhost:5432`. The database and user default to `payments`; the password
+Compose now starts the API, processor, Kafka 4.1.1 in single-node KRaft mode,
+PostgreSQL 17.6 and a one-shot topic initializer. The applications wait for successful
+topic initialization, and the processor also waits for a healthy database. Check
+`docker compose ps -a`: kafka-init must exit with code 0. API health is checked via
+Actuator; the processor has no HTTP server and its running state does **not** prove
+listener health. The acceptance exercise below verifies actual consumption.
+Stop following logs with Ctrl+C; this does not stop Kafka.
+Ports bind to loopback: API at `localhost:8080` (`API_PORT`), Kafka at `localhost:9092`
+and PostgreSQL at `localhost:5432`. The database and user default to `payments`; the password
 `payments_dev_only` is exclusively for local development.
 
-Both services share a dedicated `payments` bridge network. Kafka advertises
+All services share a dedicated `payments` bridge network. Kafka advertises
 `localhost:9092` to host clients and `kafka:29092` inside that network. Named volumes
 `kafka-data` and `postgres-data` retain data across `docker compose down` / `up`.
 Compose prefixes network and volume names with the project name. Keep the Kafka
@@ -54,10 +69,16 @@ Optionally copy `.env.example` to `.env` and adjust the development values:
 Copy-Item .env.example .env
 ```
 
-Compose reads `.env` automatically; host Spring Boot applications do not. Defaults
-already match, so no exports are necessary for the standard setup. For custom
-values, set the matching environment variables in each application's shell or IDE.
-For example, if you changed the ports and password in `.env`:
+Compose reads `.env` automatically. Application containers always use Kafka's internal
+address `kafka:29092` and the processor uses `postgres:5432`; published host ports do
+not change these addresses. Only the processor receives database configuration.
+Images contain no deployment credentials; development defaults in the application
+configuration are not production secrets. Supply credentials at runtime for any
+non-development deployment. The Docker build context excludes `.env`, Git data,
+tests and host build artifacts via an allowlist.
+
+For the optional host-development workflow below, Spring does not automatically
+read `.env`. Export matching values in your application's shell or IDE, for example:
 
 ```powershell
 $env:KAFKA_PORT = '19092'
@@ -81,9 +102,12 @@ docker compose run --rm kafka-init
 docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --list
 ```
 
-Run the applications on the host in separate terminals:
+To develop on the host instead, stop the application containers first and keep only
+the infrastructure running (requires host JDK 25):
 
 ```powershell
+docker compose stop transaction-api transaction-processor
+docker compose up -d kafka postgres kafka-init
 .\mvnw.cmd -pl shared-contracts -am install
 .\mvnw.cmd -pl transaction-api spring-boot:run
 # In another terminal:
@@ -93,9 +117,40 @@ Run the applications on the host in separate terminals:
 The processor applies Flyway migrations before consuming events. Its group defaults
 to `transaction-processor-local` (`KAFKA_CONSUMER_GROUP`), and its topic defaults to
 `transactions.received` (`TRANSACTIONS_RECEIVED_TOPIC`). Coordinate topic overrides
-with the API's `payments.kafka.received-topic` property and topic provisioning.
+with topic provisioning. Compose supplies the API's `PAYMENTS_KAFKA_RECEIVED_TOPIC`;
+host execution can override its `payments.kafka.received-topic` property.
 The Testcontainers intake demo below starts only the API and its own broker; use
-Compose with both host applications for the complete flow.
+the full Compose stack for the complete flow.
+
+### Container acceptance exercise (M1)
+
+From PowerShell 5.1+ or PowerShell 7, run:
+
+```powershell
+.\scripts\verify-compose.ps1
+```
+
+The script builds from sources and creates a unique disposable Compose project with
+random host ports. It checks UID 10001 for both applications, HTTP 202, one ledger row,
+an identical retry processed as DUPLICATE without mutation, a negative-amount rejection
+only in the audit table, and the keyed version-1 Kafka rejection notification. It then
+performs down/up without deleting volumes, verifies retained ledger/audit data and a
+new accepted payment. Its own containers and volumes are removed in finally, including
+on failure; your normal Compose project is not touched. Build cache/images can remain.
+
+Inspect the regular stack with `docker compose logs -f transaction-api transaction-processor`
+and `docker compose exec postgres psql -U payments -d payments` (adapt credentials if
+overridden). Compare ledger_transactions and transaction_rejections while submitting
+the same example request twice. A 202 is Kafka intake confirmation, not ledger completion.
+
+Multi-stage Dockerfiles pin Temurin 25 build/runtime bases by digest and keep only the
+JRE/JAR in the final image. Applications use UID/GID 10001, a read-only root filesystem,
+writable /tmp, dropped capabilities and no-new-privileges. Packaging skips tests inside
+Docker; validation remains `.\mvnw.cmd clean verify` plus the Compose acceptance script.
+The tradeoff is a larger Ubuntu JRE than distroless, with useful diagnostic tools for
+this learning milestone. Listener-state probes, image scans, SBOMs and image publication
+belong to later roadmap milestones; no outbox or automatic recovery has been added.
+See [ADR 0007](docs/adr/0007-containerized-local-platform.md).
 
 ## Kafka processing and acknowledgement
 
@@ -414,8 +469,7 @@ The native image crashed during setup on the GitHub Ubuntu runner in
 [run 35428956254](https://github.com/Abderraouf1990/realtime-payment-platform/actions/runs/35428956254/job/105863836497).
 Both variants are supported by the
 [Testcontainers Kafka module](https://java.testcontainers.org/modules/kafka/).
-Spring Boot manages JUnit Jupiter 6.0.1, as required by Spring Framework 7, despite
-the older JUnit 5 wording in the project instructions.
+Spring Boot manages JUnit Jupiter 6.0.1, as required by Spring Framework 7.
 
 Rejection audit integration tests include V1-to-V2 migration, null/decimal preservation,
 idempotence and a rejection COMMIT failure with no premature Kafka acknowledgement.
