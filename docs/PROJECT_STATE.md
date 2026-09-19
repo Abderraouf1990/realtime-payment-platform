@@ -8,7 +8,7 @@ Updated: 2026-09-19
   `payment-e2e-tests` runs the packaged applications in separate JVMs for black-box testing.
 - Parent manages Java 25 and Spring Boot 4.0.1; Maven Wrapper pins Maven 3.9.0.
 - `shared-contracts` contains framework-free `contracts.v1.TransactionReceived`
-  (including `correlationId`) and `TransactionType` (`TRANSFER`).
+  (including `correlationId`), `TransactionRejected` and `TransactionType` (`TRANSFER`).
 - `transaction-api` depends on the contracts module and implements
   `POST /api/v1/transactions`, structural validation, ID/header matching, event mapping,
   Kafka publication, and sanitized Problem Details errors.
@@ -27,8 +27,12 @@ Updated: 2026-09-19
   acceptance from business rejection; all rejection reasons are accumulated.
   Rejections never write to the ledger. Flyway V2 adds `transaction_rejections`,
   storing audit fields and reason codes through a dedicated transactional port/adapter.
-  Normal listener return permits acknowledgement only after rejection persistence
-  commits; rejection database errors stop consumption without advancing the offset.
+  After rejection persistence commits, a publisher port sends `TransactionRejected`
+  keyed by transactionId to configurable `payments.kafka.rejected-topic` (default
+  transactions.rejected). JSON has no Java type headers. Normal return/ack requires
+  broker confirmation; database and publication errors stop consumption without
+  advancing the offset. Persistence and publication are not atomic without an outbox;
+  replay can duplicate notifications, even though the audit remains idempotent.
   PostgreSQL deduplicates transactionId + business payload, including null values;
   the first correlation, timestamps and reasons are retained.
   Explicit JSON deserialization ignores Java type headers. Consumer group and topic
@@ -50,6 +54,19 @@ Updated: 2026-09-19
   permissions. Surefire/Failsafe reports are uploaded only on failure.
 
 ## Validated State
+
+- 2026-09-19: Rejection notification focused validation passed with
+  `.\mvnw.cmd -pl transaction-processor -am verify`: 38 unit tests and 13 integration
+  tests, no failures, errors or skips. Tests cover version-1 JSON round-trip without
+  Java headers, store-before-send ordering, no send on COMMIT failure, configured
+  output topic/key, and publication failure followed by manual restart/replay.
+  `docker compose --env-file .env.example config --quiet` passed. An isolated Compose
+  project created both topics and successfully reran kafka-init; its containers,
+  network and volume were removed afterwards.
+  The subsequent `.\mvnw.cmd clean verify` passed in 3m03s: 74 Surefire tests and
+  20 Failsafe tests (including all five real-JAR E2E scenarios), with no failures,
+  errors or skips. API code, migrations and CI configuration are unchanged.
+  These are local results; no GitHub run is claimed for this uncommitted change.
 
 - 2026-09-19: Durable business rejection persistence passed the focused processor
   command `.\mvnw.cmd -pl transaction-processor -am verify`, then the full
@@ -178,7 +195,8 @@ Historical focused commands (before the move to Failsafe; see README for current
 See [ADR 0001](adr/0001-transaction-intake-contract.md) and
 [ADR 0002](adr/0002-ledger-consumption.md) and
 [ADR 0003](adr/0003-business-rejections.md), [ADR 0004](adr/0004-payload-conflicts.md),
-and [ADR 0005](adr/0005-durable-business-rejections.md).
+and [ADR 0005](adr/0005-durable-business-rejections.md), extended by
+[ADR 0006](adr/0006-rejection-notifications.md).
 
 - `Idempotency-Key` must equal the client-supplied `transactionId`; Kafka uses that
   ID as its record key. This does not guarantee ordering across an account.
@@ -202,19 +220,25 @@ and [ADR 0005](adr/0005-durable-business-rejections.md).
   rejection audit persistence must commit before normal return permits acknowledgement.
 - Kafka auto-commit is disabled; RECORD acknowledgement follows committed database
   work or verified duplication for accepted events. Business rejections are persisted
-  idempotently in transaction_rejections before logging/ack, without ledger writes.
+  idempotently in transaction_rejections and then published with broker confirmation
+  before logging/ack, without ledger writes. Duplicate audits still trigger publication
+  to recover a failed send; notifications reflect the current rejected attempt.
   Technical/contract failures stop
   the listener without skipping records.
   Recovery requires correcting the failure and restarting; no retry/DLQ topics exist.
   This is at-least-once delivery with idempotent database effects.
 - Amount sign and supported-currency checks belong to the processor. An intake 202
   confirms publication, not business validation or accounting completion.
-- Normal startup requires an externally provisioned topic. The test launcher and
+- Normal startup requires externally provisioned input/output topics. Compose's
+  one-shot kafka-init provisions both topics idempotently. The test launcher and
   API integration configuration create a disposable three-partition topic; processor
   integration configuration uses one partition. Both use one replica.
 
 ## Current Gaps and Known Build Notes
 
+- No outbox: committed rejection audits and Kafka notifications are not atomic.
+  Recovery depends on replay of retained input; publication can be repeated and the
+  minimal notification contract does not identify each distinct rejected payload.
 - Define audit retention/access controls and operational recovery for malformed
   events; currently technical/contract failures stop consumption. Add listener
   health monitoring: the application process can remain alive after the listener stops.
@@ -234,12 +258,12 @@ and [ADR 0005](adr/0005-durable-business-rejections.md).
 
 ## Next Objective
 
-Expose stopped-consumer health and define an operational recovery procedure without
-losing the durable ledger/rejection guarantees.
+Design a transactional outbox for rejection notifications to close the durable
+audit-to-publication gap, retaining explicit downstream duplicate handling.
 
 ## Acceptance Criteria for the Next Objective
 
-- Report a stopped listener as unhealthy and distinguish infrastructure failure from
-  malformed input requiring intervention.
-- Document recovery, audit access and retention; keep the API isolated from PostgreSQL.
-- Test health transitions and replay with no ack before durable ledger/rejection completion.
+- Persist audit and pending notification in one PostgreSQL transaction.
+- Publish pending notifications independently of input retention, with bounded retries
+  and observable backlog; keep the API isolated from PostgreSQL.
+- Define a stable notification identity and test crash windows without exactly-once claims.

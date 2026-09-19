@@ -1,6 +1,17 @@
 package com.aayadi.payment.processor;
 
 import com.aayadi.payment.contracts.v1.TransactionReceived;
+import com.aayadi.payment.contracts.v1.TransactionRejected;
+import com.aayadi.payment.processor.adapter.kafka.KafkaRejectionPublisher;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.clients.admin.OffsetSpec;
+import java.util.List;
+import java.util.ArrayList;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.doCallRealMethod;
+import static org.mockito.ArgumentMatchers.any;
 import com.aayadi.payment.contracts.v1.TransactionType;
 import com.aayadi.payment.processor.application.LedgerStore;
 import com.aayadi.payment.processor.domain.LedgerEntry;
@@ -31,13 +42,16 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
-@SpringBootTest(properties = "spring.kafka.consumer.group-id=processor-integration")
+@SpringBootTest(properties = {"spring.kafka.consumer.group-id=processor-integration",
+        "payments.kafka.rejected-topic=integration.rejected"})
 @Import(TestcontainersConfiguration.class)
 @ExtendWith(OutputCaptureExtension.class)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
 class ProcessorKafkaIT {
     private static final String TOPIC = "transactions.received";
     private static final String GROUP = "processor-integration";
+    private static final String REJECTED = "integration.rejected";
+    @MockitoSpyBean private KafkaRejectionPublisher rejectionPublisher;
     @Autowired private KafkaContainer kafka;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private KafkaListenerEndpointRegistry registry;
@@ -87,6 +101,7 @@ class ProcessorKafkaIT {
                     "transactionId=TX-IDENTICAL outcome=DUPLICATE");
             assertThat(output.getAll()).doesNotContain("Ledger processing failed", "PRIVATE-ACCOUNT");
             assertThat(jdbc.queryForObject("SELECT count(*) FROM transaction_rejections", Integer.class)).isZero();
+            assertThat(rejectedEndOffset(admin)).isZero();
         }
     }
 
@@ -207,6 +222,9 @@ class ProcessorKafkaIT {
             assertThat(count(rejected.transactionId())).isZero();
             assertThat(jdbc.queryForObject("SELECT count(*) FROM transaction_rejections", Integer.class)).isZero();
 
+            // The deferred trigger failed COMMIT, not INSERT: no notification may have escaped.
+            assertThat(rejectedEndOffset(admin)).isZero();
+
             jdbc.execute("DROP TRIGGER test_rejection_failure ON transaction_rejections");
             jdbc.execute("DROP FUNCTION test_fail_rejection_commit()");
             listener.start();
@@ -221,7 +239,68 @@ class ProcessorKafkaIT {
             assertThat(jdbc.queryForObject("SELECT reason_codes::text FROM transaction_rejections", String.class)).isEqualTo("{AMOUNT_NOT_POSITIVE}");
             assertThat(count(rejected.transactionId())).isZero();
             assertThat(listener.isRunning()).isTrue();
+            assertThat(rejectedEndOffset(admin)).isEqualTo(3);
+            var notifications = readRejections(3);
+            assertThat(notifications).allSatisfy(notification -> {
+                assertThat(notification.schemaVersion()).isEqualTo(1);
+                assertThat(notification.transactionId()).isEqualTo(rejected.transactionId());
+                assertThat(notification.reasonCodes()).containsExactly("AMOUNT_NOT_POSITIVE");
+                assertThat(notification.rejectedAt()).isNotNull();
+            });
+            assertThat(notifications).extracting(TransactionRejected::correlationId)
+                    .containsExactly("CORR-REJECT-FIRST", "CORR-REJECT-FIRST", "CORR-REJECT-RETRY");
         }
+    }
+
+    @Test
+    void publicationFailureLeavesCommittedAuditAndUnacknowledgedInputForReplay() throws Exception {
+        var listener = registry.getListenerContainer("transaction-received");
+        try (var producer = new KafkaProducer<String, String>(Map.of("bootstrap.servers", kafka.getBootstrapServers()),
+                new StringSerializer(), new StringSerializer());
+             var admin = Admin.create(Map.of("bootstrap.servers", kafka.getBootstrapServers()))) {
+            long baseline = send(producer, event("TX-BASELINE", "CORR-BASELINE", "1.00"));
+            await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> assertThat(committed(admin)).isEqualTo(baseline + 1));
+            doThrow(new IllegalStateException("Injected publication failure")).when(rejectionPublisher).publish(any());
+            long failed = send(producer, event("TX-PUBLISH-FAIL", "CORR-PUBLISH", "-1.00"));
+            await().atMost(Duration.ofSeconds(20)).until(() -> !listener.isRunning());
+            assertThat(committed(admin)).isEqualTo(failed);
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM transaction_rejections", Integer.class)).isEqualTo(1);
+            assertThat(count("TX-PUBLISH-FAIL")).isZero();
+            assertThat(rejectedEndOffset(admin)).isZero();
+            doCallRealMethod().when(rejectionPublisher).publish(any());
+            listener.start();
+            await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> assertThat(committed(admin)).isEqualTo(failed + 1));
+            assertThat(readRejections(1)).singleElement().satisfies(notification ->
+                    assertThat(notification.transactionId()).isEqualTo("TX-PUBLISH-FAIL"));
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM transaction_rejections", Integer.class)).isEqualTo(1);
+        }
+    }
+
+    private static long rejectedEndOffset(Admin admin) throws Exception {
+        return admin.listOffsets(Map.of(new TopicPartition(REJECTED, 0), OffsetSpec.latest()))
+                .all().get(5, TimeUnit.SECONDS).get(new TopicPartition(REJECTED, 0)).offset();
+    }
+
+    private List<TransactionRejected> readRejections(int expected) {
+        var notifications = new ArrayList<TransactionRejected>();
+        try (var consumer = new KafkaConsumer<String, String>(Map.of("bootstrap.servers", kafka.getBootstrapServers(),
+                "enable.auto.commit", false), new StringDeserializer(), new StringDeserializer())) {
+            var partition = new TopicPartition(REJECTED, 0);
+            consumer.assign(List.of(partition));
+            consumer.seek(partition, 0);
+            await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
+                for (var record : consumer.poll(Duration.ofMillis(200))) {
+                    var notification = JsonMapper.builder().build().readValue(record.value(), TransactionRejected.class);
+                    assertThat(record.key()).isEqualTo(notification.transactionId());
+                    assertThat(record.headers().lastHeader("__TypeId__")).isNull();
+                    assertThat(jdbc.queryForObject("SELECT count(*) FROM transaction_rejections WHERE transaction_id=?",
+                            Integer.class, notification.transactionId())).isEqualTo(1);
+                    notifications.add(notification);
+                }
+                assertThat(notifications).hasSize(expected);
+            });
+        }
+        return notifications;
     }
 
     private int count(String transactionId) {

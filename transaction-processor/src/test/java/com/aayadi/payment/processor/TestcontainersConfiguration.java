@@ -11,6 +11,10 @@ import org.springframework.kafka.config.TopicBuilder;
 
 @TestConfiguration(proxyBeanMethods = false)
 class TestcontainersConfiguration {
+    @Bean
+    NewTopic rejectedTopic(@org.springframework.beans.factory.annotation.Value("${payments.kafka.rejected-topic}") String topic) {
+        return TopicBuilder.name(topic).partitions(1).replicas(1).build();
+    }
 	@Bean
 	NewTopic receivedTopic() {
 		return TopicBuilder.name("transactions.received").partitions(1).replicas(1).build();

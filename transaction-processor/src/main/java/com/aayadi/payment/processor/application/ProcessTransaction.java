@@ -1,6 +1,7 @@
 package com.aayadi.payment.processor.application;
 
 import com.aayadi.payment.contracts.v1.TransactionReceived;
+import com.aayadi.payment.contracts.v1.TransactionRejected;
 import com.aayadi.payment.processor.domain.LedgerEntry;
 import com.aayadi.payment.processor.domain.TransactionRules;
 import com.aayadi.payment.processor.domain.BusinessPayload;
@@ -13,12 +14,15 @@ public class ProcessTransaction {
     private final Clock clock;
     private final TransactionRules rules;
     private final RejectionStore rejections;
+    private final RejectionPublisher publisher;
 
-    public ProcessTransaction(LedgerStore store, Clock clock, TransactionRules rules, RejectionStore rejections) {
+    public ProcessTransaction(LedgerStore store, Clock clock, TransactionRules rules, RejectionStore rejections,
+                              RejectionPublisher publisher) {
         this.store = store;
         this.clock = clock;
         this.rules = rules;
         this.rejections = rejections;
+        this.publisher = publisher;
     }
 
     public ProcessingResult process(TransactionReceived event) {
@@ -51,8 +55,13 @@ public class ProcessTransaction {
     }
 
     private ProcessingResult.Rejected reject(TransactionReceived event, List<TransactionRules.RejectionReason> reasons) {
+        var rejectedAt = clock.instant();
         rejections.save(new TransactionRejection(event.transactionId(), event.correlationId(), event.accountId(),
-                event.amount(), event.currency(), event.type(), event.receivedAt(), clock.instant(), reasons));
+                event.amount(), event.currency(), event.type(), event.receivedAt(), rejectedAt, reasons));
+        // The transactional store proxy has committed before returning. No encompassing transaction here.
+        // Publish even on a durable duplicate: a previous attempt may have failed after DB commit.
+        publisher.publish(new TransactionRejected(1, event.transactionId(), event.correlationId(),
+                reasons.stream().map(Enum::name).toList(), rejectedAt));
         return new ProcessingResult.Rejected(reasons);
     }
 

@@ -32,9 +32,10 @@ docker compose logs -f kafka
 docker compose down
 ```
 
-Wait for both services to become `healthy` in `docker compose ps` before starting
-the applications. Stop following logs with Ctrl+C; this does not stop Kafka.
-Compose runs only Kafka 4.1.1 in single-node KRaft mode and PostgreSQL 17.6.
+Wait for Kafka and PostgreSQL to become `healthy` and for `kafka-init` to exit with
+code 0 (`docker compose ps -a`) before starting the applications. Stop following
+logs with Ctrl+C; this does not stop Kafka. Compose runs Kafka 4.1.1 in single-node
+KRaft mode, PostgreSQL 17.6 and a one-shot topic initializer; applications run on the host.
 Ports bind to the host loopback interface: Kafka at `localhost:9092` and PostgreSQL
 at `localhost:5432`. The database and user default to `payments`; the password
 `payments_dev_only` is exclusively for local development.
@@ -69,10 +70,15 @@ The processor also accepts `POSTGRES_HOST`, `POSTGRES_DB`, and `POSTGRES_USER`.
 Only the processor connects to PostgreSQL; the API uses Kafka only.
 `KAFKA_BOOTSTRAP_SERVERS` overrides the host Kafka address in both applications.
 
-Topic auto-creation is disabled. After Kafka is healthy, provision the intake topic:
+Topic auto-creation is disabled. `kafka-init` provisions `transactions.received` and
+`transactions.rejected` idempotently with three partitions and one replica each.
+Override their names with `TRANSACTIONS_RECEIVED_TOPIC` and `TRANSACTIONS_REJECTED_TOPIC`.
+Inspect provisioning or rerun it after changing the configuration:
 
 ```sh
-docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists --topic transactions.received --partitions 3 --replication-factor 1
+docker compose logs kafka-init
+docker compose run --rm kafka-init
+docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --list
 ```
 
 Run the applications on the host in separate terminals:
@@ -106,8 +112,9 @@ fit NUMERIC(17,2); invalid representation remains a contract error.
 Rejections log only transaction ID, correlation ID, and reason codes:
 `AMOUNT_NOT_POSITIVE`, `CURRENCY_NOT_EUR`, `TYPE_NOT_TRANSFER` (or `PAYLOAD_CONFLICT`).
 The application persists every business rejection in `transaction_rejections` through
-a dedicated transactional JDBC adapter before returning. Only after its commit does
-the listener log and return normally, allowing RECORD acknowledgement. A database
+a dedicated transactional JDBC adapter. After its commit, the processor publishes
+`TransactionRejected` and waits for broker confirmation before the listener logs and
+returns normally, allowing RECORD acknowledgement. A database or publication
 failure stops consumption without acknowledging the failed event; correct the failure
 and restart to replay. No retry topic or DLQ is introduced.
 See [ADR 0005](docs/adr/0005-durable-business-rejections.md).
@@ -135,7 +142,8 @@ data, amounts, raw JSON, and underlying exception details.
 Kafka auto-commit is disabled. Spring Kafka `RECORD` acknowledgement commits the
 offset synchronously after the listener returns successfully, which happens only
 after the JDBC transaction has committed (or an identical duplicate was verified)
-for accepted events. Business rejections require committed audit persistence as well.
+for accepted events. Business rejections require committed audit persistence followed
+by confirmed rejection publication as well.
 Delivery is **at least once**: a crash between database commit and offset commit
 replays the event, and the unique constraint prevents a second ledger entry.
 There is no distributed Kafka/database transaction or exactly-once claim.
@@ -155,6 +163,35 @@ The existing row remains entirely unchanged; the incoming conflicting payload is
 persisted in the rejection table before acknowledgement. Database read/commit failures
 remain unacknowledged. An absent-ID lookup does not reserve the ID for a rejected
 invalid event; see [ADR 0004](docs/adr/0004-payload-conflicts.md) for concurrency limits.
+
+## Rejection notifications
+
+`shared-contracts` defines `contracts.v1.TransactionRejected` with `schemaVersion=1`,
+`transactionId`, `correlationId`, `reasonCodes` (an array of stable strings) and
+`rejectedAt` (UTC ISO-8601). Reason codes currently are `AMOUNT_NOT_POSITIVE`,
+`CURRENCY_NOT_EUR`, `TYPE_NOT_TRANSFER` and `PAYLOAD_CONFLICT`; consumers should tolerate
+additional codes. No account data, amount or stack trace is published.
+
+The processor publishes JSON without Java type headers, keyed by `transactionId`,
+to `payments.kafka.rejected-topic` (environment `TRANSACTIONS_REJECTED_TOPIC`, default
+`transactions.rejected`). It uses `acks=all`, producer idempotence and a bounded wait
+(`payments.kafka.publish-timeout`, default 10s). These are business outcome notifications,
+not a retry topic or DLQ. Accepted transactions emit no rejection notification.
+
+**Without an outbox, PostgreSQL persistence and Kafka publication are not atomic.**
+The application service has no enclosing database transaction: the store's transaction
+commits before the publisher is called. Publication failure leaves the audit committed
+but input unacknowledged; restore service and manually restart the listener/process.
+Replay attempts publication even when the audit row already exists. A crash after
+publication but before input offset commit, or an uncertain send timeout, can produce
+duplicate notifications. Producer idempotence does not deduplicate application replays.
+An audit row alone does not prove publication, and no background audit scan repairs it.
+Recovery depends on retained input and replay; there is no exactly-once guarantee.
+
+Each notification describes the current rejected processing attempt: incoming correlation,
+current reason codes and evaluation time. On retries these may differ from the first
+immutable audit row. `transactionId` is a partition key, not a unique notification ID;
+different conflicting payloads may share it. See [ADR 0006](docs/adr/0006-rejection-notifications.md).
 
 ## Ledger schema
 

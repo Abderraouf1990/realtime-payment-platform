@@ -4,6 +4,9 @@ Date: 2026-09-19
 
 Status: Accepted. Replaces the temporary log-and-ack policy in ADRs 0003 and 0004.
 
+Publication after audit commit and before acknowledgement is added by
+[ADR 0006](0006-rejection-notifications.md); the audit identity remains unchanged.
+
 ## Decision
 
 Flyway V2 creates `transaction_rejections` in the default application schema without

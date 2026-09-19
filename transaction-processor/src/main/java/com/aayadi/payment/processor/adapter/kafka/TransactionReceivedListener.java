@@ -39,7 +39,7 @@ public class TransactionReceivedListener {
                     }
                 }
             }
-            // Both accepted and rejected results return only after their database operation commits.
+            // Rejections also wait for broker confirmation after the database commit, before RECORD ack.
         } catch (RuntimeException exception) {
             LOG.warn("Ledger processing failed correlationId={} partition={} offset={} failureType={}",
                     correlationId, record.partition(), record.offset(), exception.getClass().getSimpleName());

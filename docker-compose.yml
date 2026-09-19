@@ -31,6 +31,22 @@ services:
     networks:
       - payments
 
+  kafka-init:
+    image: apache/kafka:4.1.1
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      TRANSACTIONS_RECEIVED_TOPIC: ${TRANSACTIONS_RECEIVED_TOPIC:-transactions.received}
+      TRANSACTIONS_REJECTED_TOPIC: ${TRANSACTIONS_REJECTED_TOPIC:-transactions.rejected}
+    entrypoint: ['/bin/sh', '-ec']
+    command:
+      - |
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists --topic "$${TRANSACTIONS_RECEIVED_TOPIC}" --partitions 3 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists --topic "$${TRANSACTIONS_REJECTED_TOPIC}" --partitions 3 --replication-factor 1
+    networks:
+      - payments
+
   postgres:
     image: postgres:17.6
     ports:

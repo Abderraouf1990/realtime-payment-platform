@@ -1,6 +1,7 @@
 package com.aayadi.payment.processor.application;
 
 import com.aayadi.payment.contracts.v1.TransactionReceived;
+import com.aayadi.payment.contracts.v1.TransactionRejected;
 import com.aayadi.payment.contracts.v1.TransactionType;
 import com.aayadi.payment.processor.domain.LedgerEntry;
 import com.aayadi.payment.processor.domain.TransactionRules;
@@ -30,7 +31,7 @@ class ProcessTransactionTests {
         List<LedgerEntry> entries = new ArrayList<>();
         List<TransactionRejection> rejections = new ArrayList<>();
         var processor = new ProcessTransaction(store(entry -> { entries.add(entry); return LedgerStore.Outcome.INSERTED; }),
-                CLOCK, new TransactionRules(), rejections::add);
+                CLOCK, new TransactionRules(), rejections::add, notification -> {});
         var expected = new ArrayList<TransactionRules.RejectionReason>();
         if ((violations & 1) != 0) expected.add(TransactionRules.RejectionReason.AMOUNT_NOT_POSITIVE);
         if ((violations & 2) != 0) expected.add(TransactionRules.RejectionReason.CURRENCY_NOT_EUR);
@@ -56,7 +57,7 @@ class ProcessTransactionTests {
     @Test
     void mapsSharedContractToLedgerAndSetsProcessingTime() {
         List<LedgerEntry> entries = new ArrayList<>();
-        var processor = new ProcessTransaction(store(entry -> { entries.add(entry); return LedgerStore.Outcome.INSERTED; }), CLOCK, new TransactionRules(), rejection -> {});
+        var processor = new ProcessTransaction(store(entry -> { entries.add(entry); return LedgerStore.Outcome.INSERTED; }), CLOCK, new TransactionRules(), rejection -> {}, notification -> { throw new AssertionError("Must not publish"); });
         var event = event(1, new BigDecimal("250.00"));
         assertThat(processor.process(event)).isEqualTo(new ProcessingResult.Accepted(LedgerStore.Outcome.INSERTED));
         assertThat(entries).containsExactly(new LedgerEntry("TX-1", "CORR-1", "ACC-1",
@@ -65,7 +66,7 @@ class ProcessTransactionTests {
 
     @Test
     void rejectsInvalidEventsBeforePersistence() {
-        var processor = new ProcessTransaction(store(entry -> { throw new AssertionError("Must not persist"); }), CLOCK, new TransactionRules(), rejection -> {});
+        var processor = new ProcessTransaction(store(entry -> { throw new AssertionError("Must not persist"); }), CLOCK, new TransactionRules(), rejection -> {}, notification -> { throw new AssertionError("Must not publish"); });
         for (var invalid : new TransactionReceived[] {null, event(2, BigDecimal.ONE),
                 event(1, new BigDecimal("1.234")),
                 event(1, new BigDecimal("1000000000000000")),
@@ -76,10 +77,10 @@ class ProcessTransactionTests {
 
     @Test
     void returnsDuplicateOutcomeAndPropagatesStorageFailure() {
-        assertThat(new ProcessTransaction(store(entry -> LedgerStore.Outcome.DUPLICATE), CLOCK, new TransactionRules(), rejection -> {}).process(event(1, BigDecimal.ONE)))
+        assertThat(new ProcessTransaction(store(entry -> LedgerStore.Outcome.DUPLICATE), CLOCK, new TransactionRules(), rejection -> {}, notification -> { throw new AssertionError("Must not publish"); }).process(event(1, BigDecimal.ONE)))
                 .isEqualTo(new ProcessingResult.Accepted(LedgerStore.Outcome.DUPLICATE));
         var failure = new IllegalStateException("storage failure");
-        var processor = new ProcessTransaction(store(entry -> { throw failure; }), CLOCK, new TransactionRules(), rejection -> {});
+        var processor = new ProcessTransaction(store(entry -> { throw failure; }), CLOCK, new TransactionRules(), rejection -> {}, notification -> { throw new AssertionError("Must not publish"); });
         assertThatThrownBy(() -> processor.process(event(1, BigDecimal.ONE))).isSameAs(failure);
     }
 
@@ -91,7 +92,7 @@ class ProcessTransactionTests {
     @Test
     void mapsInsertRaceConflictToBusinessRejection() {
         List<TransactionRejection> rejections = new ArrayList<>();
-        var processor = new ProcessTransaction(store(entry -> LedgerStore.Outcome.CONFLICT), CLOCK, new TransactionRules(), rejections::add);
+        var processor = new ProcessTransaction(store(entry -> LedgerStore.Outcome.CONFLICT), CLOCK, new TransactionRules(), rejections::add, notification -> {});
         assertThat(processor.process(event(1, BigDecimal.ONE)))
                 .isEqualTo(new ProcessingResult.Rejected(List.of(TransactionRules.RejectionReason.PAYLOAD_CONFLICT)));
         assertThat(rejections).singleElement().satisfies(rejection -> {
@@ -104,7 +105,7 @@ class ProcessTransactionTests {
     void rejectionPersistenceFailurePropagatesInsteadOfReturningRejected() {
         var failure = new IllegalStateException("rejection commit failed");
         var processor = new ProcessTransaction(store(entry -> { throw new AssertionError("No ledger write"); }),
-                CLOCK, new TransactionRules(), rejection -> { throw failure; });
+                CLOCK, new TransactionRules(), rejection -> { throw failure; }, notification -> { throw new AssertionError("Must not publish"); });
         assertThatThrownBy(() -> processor.process(event(1, BigDecimal.ZERO))).isSameAs(failure);
     }
 
@@ -118,11 +119,11 @@ class ProcessTransactionTests {
             public Outcome save(LedgerEntry entry) { throw new AssertionError("Never change existing ledger"); }
         };
         List<TransactionRejection> rejections = new ArrayList<>();
-        var processor = new ProcessTransaction(existing, CLOCK, new TransactionRules(), rejections::add);
+        var processor = new ProcessTransaction(existing, CLOCK, new TransactionRules(), rejections::add, notification -> {});
         assertThat(processor.process(event(1, BigDecimal.ONE)))
                 .isEqualTo(new ProcessingResult.Rejected(List.of(TransactionRules.RejectionReason.PAYLOAD_CONFLICT)));
         assertThat(rejections).hasSize(1);
-        var failing = new ProcessTransaction(existing, CLOCK, new TransactionRules(), rejection -> { throw failure; });
+        var failing = new ProcessTransaction(existing, CLOCK, new TransactionRules(), rejection -> { throw failure; }, notification -> { throw new AssertionError("Must not publish"); });
         assertThatThrownBy(() -> failing.process(event(1, BigDecimal.ONE))).isSameAs(failure);
     }
 
@@ -131,5 +132,36 @@ class ProcessTransactionTests {
             public Optional<BusinessPayload> findPayload(String id) { return Optional.empty(); }
             public Outcome save(LedgerEntry entry) { return save.apply(entry); }
         };
+    }
+
+    @Test
+    void publishesMappedNotificationOnlyAfterPersistenceReturns() {
+        var sequence = new ArrayList<String>();
+        var processor = new ProcessTransaction(store(entry -> { throw new AssertionError("No ledger write"); }),
+                CLOCK, new TransactionRules(), rejection -> sequence.add("persisted"), notification -> {
+                    assertThat(sequence).containsExactly("persisted");
+                    assertThat(notification).isEqualTo(new TransactionRejected(1, "TX-1", "CORR-1",
+                            List.of("AMOUNT_NOT_POSITIVE"), NOW));
+                    sequence.add("published");
+                });
+        assertThat(processor.process(event(1, BigDecimal.ZERO))).isInstanceOf(ProcessingResult.Rejected.class);
+        assertThat(sequence).containsExactly("persisted", "published");
+    }
+
+    @Test
+    void publicationFailurePropagatesAfterPersistenceAndReplayPublishesAgain() {
+        var persisted = new ArrayList<TransactionRejection>();
+        var published = new ArrayList<TransactionRejected>();
+        var failure = new IllegalStateException("broker unavailable");
+        var processor = new ProcessTransaction(store(entry -> { throw new AssertionError("No ledger write"); }),
+                CLOCK, new TransactionRules(), persisted::add, notification -> {
+                    published.add(notification);
+                    if (published.size() == 1) throw failure;
+                });
+        var event = event(1, BigDecimal.ZERO);
+        assertThatThrownBy(() -> processor.process(event)).isSameAs(failure);
+        assertThat(persisted).hasSize(1);
+        assertThat(processor.process(event)).isInstanceOf(ProcessingResult.Rejected.class);
+        assertThat(published).hasSize(2);
     }
 }

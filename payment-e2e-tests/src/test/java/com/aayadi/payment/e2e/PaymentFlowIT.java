@@ -53,7 +53,8 @@ class PaymentFlowIT {
         kafka.start();
         postgres.start();
         admin = manage(Admin.create(Map.of("bootstrap.servers", kafka.getBootstrapServers())));
-        admin.createTopics(List.of(new NewTopic(TOPIC, 1, (short) 1))).all().get(15, TimeUnit.SECONDS);
+        admin.createTopics(List.of(new NewTopic(TOPIC, 1, (short) 1),
+                new NewTopic("transactions.rejected", 1, (short) 1))).all().get(15, TimeUnit.SECONDS);
         var api = manage(launch("transaction-api", scenario + "/api.log", kafka, List.of("--server.port=0")));
         processor = manage(launchProcessor(scenario + "/processor.log", kafka, postgres));
         port = api.httpPort();
