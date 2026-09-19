@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Build a portfolio-grade, real-time payment processing platform that demonstrates reliable distributed-system design with Java, Spring Boot, Apache Kafka, PostgreSQL, observability, and production-oriented engineering practices.
+Build practical AI engineering expertise and demonstrate senior DevSecOps capabilities through a deployable real-time payment platform and a secure, evaluated incident assistant. Payment processing supplies the operational use case; critical payment decisions remain deterministic. Follow the approved milestones in `docs/ROADMAP.md`.
 
 ## Technology Stack
 
@@ -51,8 +51,8 @@ Every change must include appropriate tests. Integration tests must use pinned T
 
 Before implementing a change:
 
-1. Read this file and `docs/PROJECT_STATE.md`.
+1. Read this file, `docs/ROADMAP.md`, and `docs/PROJECT_STATE.md`.
 2. Check the relevant ADRs in `docs/adr/` when they exist.
 3. State the intended outcome, constraints, and validation criteria.
 
-After meaningful work, update `docs/PROJECT_STATE.md` with the validated state, decisions, and next objective.
+After meaningful work, update `docs/PROJECT_STATE.md` with the validated state, evidence, blockers, and one exact next task. Update `docs/ROADMAP.md` milestone status only when its acceptance criteria are demonstrated. Record user-approved priority changes in its decision history; preserve earlier decisions. Explain the main design tradeoff and a reproducible learning exercise in the handoff. Distinguish implementation, local tests and CI results for a specific commit.
