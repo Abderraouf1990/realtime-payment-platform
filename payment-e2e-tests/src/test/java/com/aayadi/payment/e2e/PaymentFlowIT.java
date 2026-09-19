@@ -85,6 +85,7 @@ class PaymentFlowIT {
     void validHttpCreatesOneLedgerRowIT() throws Exception {
         insertValidTransaction();
         assertThat(total(postgres)).isEqualTo(1);
+        assertThat(rejectionCount("TX-E2E")).isZero();
     }
 
     @Test
@@ -96,6 +97,7 @@ class PaymentFlowIT {
         assertThat(total(postgres)).isEqualTo(1);
         assertThat(row(postgres, "TX-E2E")).isEqualTo(original);
         processor.awaitLog("transactionId=TX-E2E outcome=DUPLICATE");
+        assertThat(rejectionCount("TX-E2E")).isZero();
     }
 
     @Test
@@ -106,6 +108,7 @@ class PaymentFlowIT {
         assertThat(row(postgres, "TX-E2E")).isEqualTo(original);
         assertThat(total(postgres)).isEqualTo(1);
         processor.awaitLog("transactionId=TX-E2E correlationId=CORR-CONFLICT reason=PAYLOAD_CONFLICT");
+        assertThat(rejectionCount("TX-E2E")).isEqualTo(1);
     }
 
     @Test
@@ -119,6 +122,8 @@ class PaymentFlowIT {
         assertThat(count(postgres, "TX-USD")).isZero();
         assertThat(total(postgres)).isZero();
         processor.awaitLog("transactionId=TX-USD reasons=[CURRENCY_NOT_EUR]");
+        assertThat(rejectionCount("TX-NEGATIVE")).isEqualTo(1);
+        assertThat(rejectionCount("TX-USD")).isEqualTo(1);
     }
 
     @Test
@@ -207,6 +212,14 @@ class PaymentFlowIT {
     private static int count(PostgreSQLContainer postgres, String id) throws Exception {
         try (var connection = DriverManager.getConnection(jdbcUrl(postgres), postgres.getUsername(), postgres.getPassword());
              var query = connection.prepareStatement("SELECT count(*) FROM ledger_transactions WHERE transaction_id = ?")) {
+            query.setString(1, id);
+            try (var result = query.executeQuery()) { result.next(); return result.getInt(1); }
+        }
+    }
+
+    private int rejectionCount(String id) throws Exception {
+        try (var connection = DriverManager.getConnection(jdbcUrl(postgres), postgres.getUsername(), postgres.getPassword());
+             var query = connection.prepareStatement("SELECT count(*) FROM transaction_rejections WHERE transaction_id = ?")) {
             query.setString(1, id);
             try (var result = query.executeQuery()) { result.next(); return result.getInt(1); }
         }

@@ -86,6 +86,7 @@ class ProcessorKafkaIT {
             assertThat(output.getOut()).contains("transactionId=TX-IDENTICAL outcome=INSERTED",
                     "transactionId=TX-IDENTICAL outcome=DUPLICATE");
             assertThat(output.getAll()).doesNotContain("Ledger processing failed", "PRIVATE-ACCOUNT");
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM transaction_rejections", Integer.class)).isZero();
         }
     }
 
@@ -123,6 +124,9 @@ class ProcessorKafkaIT {
             await().atMost(Duration.ofSeconds(15)).untilAsserted(() ->
                     assertThat(committed(admin)).isEqualTo(rejectedOffset + 1));
             assertThat(count("TX-REJECTED")).isZero();
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM transaction_rejections WHERE transaction_id='TX-REJECTED'", Integer.class)).isEqualTo(1);
+            assertThat(jdbc.queryForObject("SELECT reason_codes::text FROM transaction_rejections WHERE transaction_id='TX-REJECTED'", String.class))
+                    .isEqualTo("{AMOUNT_NOT_POSITIVE,CURRENCY_NOT_EUR,TYPE_NOT_TRANSFER}");
             assertThat(listener.isRunning()).isTrue();
             assertThat(output.getOut()).contains("Transaction rejected correlationId=CORR-REJECTED transactionId=TX-REJECTED",
                     "reasons=[AMOUNT_NOT_POSITIVE, CURRENCY_NOT_EUR, TYPE_NOT_TRANSFER]");
@@ -170,6 +174,53 @@ class ProcessorKafkaIT {
                     "transactionId=TX-INTEGRATION correlationId=CORR-USD reason=PAYLOAD_CONFLICT");
             assertThat(output.getOut()).contains("correlationId=CORR-INTEGRATION", "correlationId=CORR-RETRY", "correlationId=CORR-FAIL");
             assertThat(output.getAll()).doesNotContain("PRIVATE-ACCOUNT");
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM transaction_rejections WHERE transaction_id='TX-INTEGRATION'", Integer.class)).isEqualTo(2);
+            assertThat(jdbc.queryForList("SELECT reason_codes::text FROM transaction_rejections WHERE transaction_id='TX-INTEGRATION'", String.class))
+                    .containsOnly("{PAYLOAD_CONFLICT}");
+        }
+    }
+
+    @Test
+    void rejectionCommitFailurePreventsAckThenReplayAndRetriesCreateOneAuditRow() throws Exception {
+        var listener = registry.getListenerContainer("transaction-received");
+        try (var producer = new KafkaProducer<String, String>(Map.of("bootstrap.servers", kafka.getBootstrapServers()),
+                new StringSerializer(), new StringSerializer());
+             var admin = Admin.create(Map.of("bootstrap.servers", kafka.getBootstrapServers()))) {
+            long baseline = send(producer, event("TX-BASELINE", "CORR-BASELINE", "1.00"));
+            await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> assertThat(committed(admin)).isEqualTo(baseline + 1));
+            jdbc.execute("""
+                    CREATE FUNCTION test_fail_rejection_commit() RETURNS trigger LANGUAGE plpgsql AS $$
+                    BEGIN
+                        RAISE EXCEPTION 'Injected rejection commit failure' USING ERRCODE = '23514';
+                    END;
+                    $$
+                    """);
+            jdbc.execute("""
+                    CREATE CONSTRAINT TRIGGER test_rejection_failure
+                    AFTER INSERT ON transaction_rejections DEFERRABLE INITIALLY DEFERRED
+                    FOR EACH ROW EXECUTE FUNCTION test_fail_rejection_commit()
+                    """);
+            var rejected = event("TX-REJECT-FAIL", "CORR-REJECT-FIRST", "-1.00");
+            long failed = send(producer, rejected);
+            await().atMost(Duration.ofSeconds(20)).until(() -> !listener.isRunning());
+            assertThat(committed(admin)).isEqualTo(failed);
+            assertThat(count(rejected.transactionId())).isZero();
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM transaction_rejections", Integer.class)).isZero();
+
+            jdbc.execute("DROP TRIGGER test_rejection_failure ON transaction_rejections");
+            jdbc.execute("DROP FUNCTION test_fail_rejection_commit()");
+            listener.start();
+            await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> assertThat(committed(admin)).isEqualTo(failed + 1));
+            String original = jdbc.queryForObject("SELECT row_to_json(r)::text FROM transaction_rejections r", String.class);
+            long repeated = send(producer, rejected);
+            await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> assertThat(committed(admin)).isEqualTo(repeated + 1));
+            long metadataRetry = send(producer, event("TX-REJECT-FAIL", "CORR-REJECT-RETRY", "-1.0"));
+            await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> assertThat(committed(admin)).isEqualTo(metadataRetry + 1));
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM transaction_rejections", Integer.class)).isEqualTo(1);
+            assertThat(jdbc.queryForObject("SELECT row_to_json(r)::text FROM transaction_rejections r", String.class)).isEqualTo(original);
+            assertThat(jdbc.queryForObject("SELECT reason_codes::text FROM transaction_rejections", String.class)).isEqualTo("{AMOUNT_NOT_POSITIVE}");
+            assertThat(count(rejected.transactionId())).isZero();
+            assertThat(listener.isRunning()).isTrue();
         }
     }
 

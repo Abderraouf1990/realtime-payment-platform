@@ -39,7 +39,7 @@ public class TransactionReceivedListener {
                     }
                 }
             }
-            // Temporary policy: a logged business rejection completes processing and permits RECORD ack.
+            // Both accepted and rejected results return only after their database operation commits.
         } catch (RuntimeException exception) {
             LOG.warn("Ledger processing failed correlationId={} partition={} offset={} failureType={}",
                     correlationId, record.partition(), record.offset(), exception.getClass().getSimpleName());

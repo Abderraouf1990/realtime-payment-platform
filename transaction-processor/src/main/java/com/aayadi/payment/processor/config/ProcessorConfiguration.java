@@ -3,6 +3,7 @@ package com.aayadi.payment.processor.config;
 import com.aayadi.payment.processor.adapter.kafka.StopOnFailureErrorHandler;
 import com.aayadi.payment.processor.application.LedgerStore;
 import com.aayadi.payment.processor.application.ProcessTransaction;
+import com.aayadi.payment.processor.application.RejectionStore;
 import com.aayadi.payment.processor.domain.TransactionRules;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -19,8 +20,8 @@ public class ProcessorConfiguration {
     }
 
     @Bean
-    ProcessTransaction processTransaction(LedgerStore store, Clock clock) {
-        return new ProcessTransaction(store, clock, new TransactionRules());
+    ProcessTransaction processTransaction(LedgerStore store, Clock clock, RejectionStore rejections) {
+        return new ProcessTransaction(store, clock, new TransactionRules(), rejections);
     }
 
     @Bean

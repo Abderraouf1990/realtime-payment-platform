@@ -4,6 +4,8 @@ Date: 2026-09-18
 
 Status: Accepted. Supersedes conflict-as-error handling in ADR 0002 and the
 validation-before-lookup precedence in ADR 0003.
+The log-only conflict audit and temporary acknowledgement policy below are superseded
+by [ADR 0005](0005-durable-business-rejections.md).
 
 ## Decision
 

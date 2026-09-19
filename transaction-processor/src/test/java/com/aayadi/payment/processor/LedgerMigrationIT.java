@@ -31,6 +31,7 @@ class LedgerMigrationIT {
         flyway = Flyway.configure()
                 .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
                 .locations("classpath:db/migration")
+                .target("1")
                 .load();
         assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
     }

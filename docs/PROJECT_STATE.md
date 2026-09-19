@@ -25,8 +25,12 @@ Updated: 2026-09-19
   transactional JDBC ledger store. Pure `TransactionRules` require positive amounts,
   exactly EUR, and TRANSFER before persistence. `ProcessingResult` distinguishes
   acceptance from business rejection; all rejection reasons are accumulated.
-  Rejections never write to the ledger and are logged with transaction/correlation
-  IDs before normal listener return permits acknowledgement. They are not durable.
+  Rejections never write to the ledger. Flyway V2 adds `transaction_rejections`,
+  storing audit fields and reason codes through a dedicated transactional port/adapter.
+  Normal listener return permits acknowledgement only after rejection persistence
+  commits; rejection database errors stop consumption without advancing the offset.
+  PostgreSQL deduplicates transactionId + business payload, including null values;
+  the first correlation, timestamps and reasons are retained.
   Explicit JSON deserialization ignores Java type headers. Consumer group and topic
   are configurable, with local defaults.
 - Flyway's Boot starter, PostgreSQL database support, and PostgreSQL JDBC runtime
@@ -46,6 +50,18 @@ Updated: 2026-09-19
   permissions. Surefire/Failsafe reports are uploaded only on failure.
 
 ## Validated State
+
+- 2026-09-19: Durable business rejection persistence passed the focused processor
+  command `.\mvnw.cmd -pl transaction-processor -am verify`, then the full
+  `.\mvnw.cmd clean verify` in 3m23s: 68 Surefire tests and 19 Failsafe tests
+  (including five E2E), with no failures, errors or skips. PostgreSQL tests verify
+  V1-to-V2 upgrade preserving ledger data, audit indexes, exact decimal/null values,
+  metadata-independent deduplication and immutable first reasons. Kafka tests prove
+  a rejection COMMIT failure rolls back without advancing the offset; manual restart
+  replays successfully and repeated rejection deliveries retain one audit row.
+  E2E scenarios additionally assert ledger/audit separation and durable conflicts.
+  API, shared contracts, V1 and CI configuration are unchanged. These results are
+  local validation; the earlier linked GitHub run covers its stated commit only.
 
 - 2026-09-19: Refactored `PaymentFlowIT` into five independent scenarios with shared
   bootstrap/cleanup code and fresh pinned containers plus real application JARs per
@@ -161,7 +177,8 @@ Historical focused commands (before the move to Failsafe; see README for current
 
 See [ADR 0001](adr/0001-transaction-intake-contract.md) and
 [ADR 0002](adr/0002-ledger-consumption.md) and
-[ADR 0003](adr/0003-business-rejections.md) and [ADR 0004](adr/0004-payload-conflicts.md).
+[ADR 0003](adr/0003-business-rejections.md), [ADR 0004](adr/0004-payload-conflicts.md),
+and [ADR 0005](adr/0005-durable-business-rejections.md).
 
 - `Idempotency-Key` must equal the client-supplied `transactionId`; Kafka uses that
   ID as its record key. This does not guarantee ordering across an account.
@@ -182,10 +199,11 @@ See [ADR 0001](adr/0001-transaction-intake-contract.md) and
   amount, currency or type returns a rejection with PAYLOAD_CONFLICT. The same pure
   comparison runs after an insert loses a race. No existing columns are replaced.
   Conflicts log incoming transaction/correlation IDs and reason=PAYLOAD_CONFLICT;
-  normal listener return permits acknowledgement. Conflict history is not durable.
+  rejection audit persistence must commit before normal return permits acknowledgement.
 - Kafka auto-commit is disabled; RECORD acknowledgement follows committed database
-  work or verified duplication for accepted events. Business rejections are temporarily
-  logged and acknowledged without ledger writes. Technical/contract failures stop
+  work or verified duplication for accepted events. Business rejections are persisted
+  idempotently in transaction_rejections before logging/ack, without ledger writes.
+  Technical/contract failures stop
   the listener without skipping records.
   Recovery requires correcting the failure and restarting; no retry/DLQ topics exist.
   This is at-least-once delivery with idempotent database effects.
@@ -197,7 +215,7 @@ See [ADR 0001](adr/0001-transaction-intake-contract.md) and
 
 ## Current Gaps and Known Build Notes
 
-- Define durable business rejection storage and operational recovery for malformed
+- Define audit retention/access controls and operational recovery for malformed
   events; currently technical/contract failures stop consumption. Add listener
   health monitoring: the application process can remain alive after the listener stops.
 - Add concurrent duplicate tests and process-crash testing between database and
@@ -216,13 +234,12 @@ See [ADR 0001](adr/0001-transaction-intake-contract.md) and
 
 ## Next Objective
 
-Persist business rejection outcomes idempotently, replacing the temporary log-and-ack
-policy with durable traceability before acknowledgement.
+Expose stopped-consumer health and define an operational recovery procedure without
+losing the durable ledger/rejection guarantees.
 
 ## Acceptance Criteria for the Next Objective
 
-- Define rejection storage and repeated/conflicting rejection policy in an ADR.
-- Persist outcomes idempotently and preserve correlation metadata without changing
-  the API's database isolation or acknowledging before durable completion.
-- Test valid and rejected HTTP-to-ledger flows, repeated delivery, and recovery.
-- Expose stopped-consumer health and document the operator recovery procedure.
+- Report a stopped listener as unhealthy and distinguish infrastructure failure from
+  malformed input requiring intervention.
+- Document recovery, audit access and retention; keep the API isolated from PostgreSQL.
+- Test health transitions and replay with no ack before durable ledger/rejection completion.

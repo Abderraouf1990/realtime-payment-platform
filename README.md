@@ -6,7 +6,7 @@ A Java 25 / Spring Boot 4.0.1 payment-processing demonstrator with the intended 
 
 The API publishes events and the processor consumes them into the PostgreSQL ledger,
 with database-backed deduplication and commit-before-acknowledgement ordering for
-accepted transactions. Business rejections are temporarily logged and acknowledged.
+accepted transactions and durable business rejections.
 
 ## Modules
 
@@ -104,13 +104,13 @@ New events rejected by rules never write to the ledger. Accepted new amounts mus
 fit NUMERIC(17,2); invalid representation remains a contract error.
 
 Rejections log only transaction ID, correlation ID, and reason codes:
-`AMOUNT_NOT_POSITIVE`, `CURRENCY_NOT_EUR`, `TYPE_NOT_TRANSFER`. The listener returns
-normally after logging, so RECORD acknowledgement advances the offset without a
-ledger write. This temporary policy avoids repeated consumption of deterministic
-business rejections. **There is no durable rejection record**: after offset commit,
-the consumer group does not replay the rejection automatically; log retention is
-not an audit guarantee. A crash before offset commit may repeat the rejection log.
-No retry topic or DLQ is introduced. See [ADR 0003](docs/adr/0003-business-rejections.md).
+`AMOUNT_NOT_POSITIVE`, `CURRENCY_NOT_EUR`, `TYPE_NOT_TRANSFER` (or `PAYLOAD_CONFLICT`).
+The application persists every business rejection in `transaction_rejections` through
+a dedicated transactional JDBC adapter before returning. Only after its commit does
+the listener log and return normally, allowing RECORD acknowledgement. A database
+failure stops consumption without acknowledging the failed event; correct the failure
+and restart to replay. No retry topic or DLQ is introduced.
+See [ADR 0005](docs/adr/0005-durable-business-rejections.md).
 
 `ProcessTransaction` first reads the payload by transactionId after envelope validation.
 An equal existing payload returns DUPLICATE; a difference on accountId, amount,
@@ -135,7 +135,7 @@ data, amounts, raw JSON, and underlying exception details.
 Kafka auto-commit is disabled. Spring Kafka `RECORD` acknowledgement commits the
 offset synchronously after the listener returns successfully, which happens only
 after the JDBC transaction has committed (or an identical duplicate was verified)
-for accepted events. Business rejections use the temporary logging policy above.
+for accepted events. Business rejections require committed audit persistence as well.
 Delivery is **at least once**: a crash between database commit and offset commit
 replays the event, and the unique constraint prevents a second ledger entry.
 There is no distributed Kafka/database transaction or exactly-once claim.
@@ -151,8 +151,8 @@ See [ADR 0002](docs/adr/0002-ledger-consumption.md).
 
 Payload conflicts are logged as `transactionId=... correlationId=... reason=PAYLOAD_CONFLICT`
 using the incoming correlation ID, then acknowledged by normal listener return.
-The existing row remains entirely unchanged. This temporary policy avoids blocking
-consumption but supplies no durable conflict history. Database read/commit failures
+The existing row remains entirely unchanged; the incoming conflicting payload is
+persisted in the rejection table before acknowledgement. Database read/commit failures
 remain unacknowledged. An absent-ID lookup does not reserve the ID for a rejected
 invalid event; see [ADR 0004](docs/adr/0004-payload-conflicts.md) for concurrency limits.
 
@@ -185,6 +185,28 @@ index on `transaction_id` or speculative per-column indexes are added.
 The unique constraint prevents duplicate transaction IDs at the database boundary;
 the consumer also compares duplicate business payloads before acknowledging them.
 Once applied, keep V1 unchanged and introduce subsequent schema changes as V2, V3, etc.
+
+## Rejection audit schema
+
+Flyway V2 creates `transaction_rejections` with generated BIGINT `id`, required
+transaction/correlation/account IDs, `amount NUMERIC`, `currency TEXT`, `type VARCHAR(32)`,
+required `received_at`/`rejected_at TIMESTAMPTZ`, and nonempty `reason_codes TEXT[]`.
+Missing business values are stored as NULL and rejected decimals are not rounded.
+No stack trace or technical exception message is stored.
+
+A PostgreSQL unique constraint with NULLS NOT DISTINCT covers transaction_id,
+account_id, amount, currency and type. Identical business payloads create one audit
+row, even if correlation or timestamps change; amounts compare numerically. First
+metadata and reason codes are retained. A different business payload creates its
+own rejection row. The unique index supports transaction_id lookup; a separate
+rejected_at index supports time-based audit queries.
+
+Accepted events write only to the ledger; rejected events write only to the audit
+table. A conflict preserves the previous accepted ledger row. A corrected valid
+payload can later use an ID seen in a rejection, so the two tables may contain the
+same transaction_id for different payloads. This audit records first rejections,
+not every Kafka delivery. Retention, audit access control and a query API remain
+future work. A replay after DB commit is deduplicated; no exactly-once claim is made.
 
 ## Run the intake demo
 
@@ -240,7 +262,7 @@ endpoint yet.
   three uppercase letters; `TRANSFER` is the only current transaction type.
 - The processor accepts only positive EUR transfers. A structurally valid negative
   amount or non-EUR currency can receive 202 at intake, then be logged as rejected
-  and acknowledged without a ledger entry. There is no durable rejection outcome yet.
+  and persisted as a rejection before acknowledgement, without a ledger entry.
 - The shared enum currently contains only `TRANSFER`. A missing type is a business
   rejection; an unknown JSON enum value fails deserialization and stops the consumer.
 - Retry with the same ID, key, and payload. Retries may publish multiple events.
@@ -352,4 +374,6 @@ Kafka is pinned to `4.1.1` and PostgreSQL to `17.6`.
 Spring Boot manages JUnit Jupiter 6.0.1, as required by Spring Framework 7, despite
 the older JUnit 5 wording in the project instructions.
 
-Durable rejection handling, automated recovery, and operational dashboards remain future work.
+Rejection audit integration tests include V1-to-V2 migration, null/decimal preservation,
+idempotence and a rejection COMMIT failure with no premature Kafka acknowledgement.
+Automated recovery, audit access control and operational dashboards remain future work.
