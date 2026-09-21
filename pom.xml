@@ -10,7 +10,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.0.1</version>
+        <version>4.0.8</version>
         <relativePath/>
     </parent>
 
@@ -34,6 +34,9 @@
 
     <properties>
         <java.version>25</java.version>
+        <!-- Boot 4.0.8 manages 11.0.24; newer Tomcat security fixes require this override.
+             Remove when the Boot BOM manages 11.0.26 or later (see ADR 0008). -->
+        <tomcat.version>11.0.26</tomcat.version>
 
         <maven.compiler.release>${java.version}</maven.compiler.release>
         <maven.compiler.parameters>true</maven.compiler.parameters>

@@ -1,6 +1,6 @@
 # Realtime Payment Platform
 
-A Java 25 / Spring Boot 4.0.1 payment-processing demonstrator with the intended flow:
+A Java 25 / Spring Boot 4.0.8 payment-processing demonstrator with the intended flow:
 
 `Transaction API -> Kafka -> Transaction Processor -> PostgreSQL`
 
@@ -469,7 +469,7 @@ The native image crashed during setup on the GitHub Ubuntu runner in
 [run 35428956254](https://github.com/Abderraouf1990/realtime-payment-platform/actions/runs/35428956254/job/105863836497).
 Both variants are supported by the
 [Testcontainers Kafka module](https://java.testcontainers.org/modules/kafka/).
-Spring Boot manages JUnit Jupiter 6.0.1, as required by Spring Framework 7.
+Spring Boot manages JUnit Jupiter 6.0.3, as required by Spring Framework 7.
 
 Rejection audit integration tests include V1-to-V2 migration, null/decimal preservation,
 idempotence and a rejection COMMIT failure with no premature Kafka acknowledgement.
@@ -484,6 +484,12 @@ The delivery policy blocks every code/secret finding, HIGH/CRITICAL vulnerabilit
 configured. See [ADR 0008](docs/adr/0008-secure-image-delivery.md) for coverage,
 permissions, artifact handling and limitations, and
 [PROJECT_STATE](docs/PROJECT_STATE.md) for actual validation results.
+
+The dependency remediation uses Boot 4.0.8's BOM plus a targeted Tomcat 11.0.26
+override; see the rationale and override removal condition in ADR 0008. Kafka
+clients are now 4.1.2 while the pinned local/test broker remains 4.1.1. The local
+image scans pass the blocking policy; remaining MEDIUM/LOW findings are visible
+in the reports. This does not establish a passing remote CI run or GHCR delivery.
 
 Run policy tests and a checkout secret scan from the repository root
 (Python 3.11+, PowerShell and Docker):

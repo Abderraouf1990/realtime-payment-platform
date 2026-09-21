@@ -81,7 +81,7 @@ confirmation waiting, timeout, and interruption. A pinned Kafka Testcontainer te
 submits HTTP requests, consumes raw JSON, checks the contract and key, and checks
 that retries retain the transaction identity. These do not validate ledger behavior.
 
-Spring Boot 4.0.1 manages JUnit Jupiter 6.0.1. Spring Framework 7's `SpringExtension`
+The original Spring Boot 4.0.1 baseline managed JUnit Jupiter 6.0.1. Spring Framework 7's `SpringExtension`
 [requires Jupiter 6](https://docs.spring.io/spring-framework/reference/testing/testcontext-framework/support-classes.html).
-The existing managed version is retained; `AGENTS.md`'s JUnit 5 requirement conflicts
-with this stack and still needs alignment.
+The Boot-managed version is retained (now 6.0.3 with Boot 4.0.8); `AGENTS.md`
+has been aligned to Jupiter 6.

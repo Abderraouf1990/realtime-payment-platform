@@ -84,3 +84,28 @@ measured local results and outstanding remote criteria.
 Reproducible exercise: run the source scan and a scan of a locally built image,
 inspect its `trivy.json` alongside `sbom.cdx.json`, and run the Python tests to
 observe that adding a HIGH finding or modifying a bundle file blocks promotion.
+
+## Dependency remediation (2026-09-21)
+
+The first scans blocked both application images on Java dependencies. Upgrade the
+parent from Boot 4.0.1 to the released
+[Boot 4.0.8](https://spring.io/blog/2026/08/20/spring-boot-4-0-8-available-now/),
+remaining on the 4.0 line rather than introducing a minor-version migration.
+Its BOM aligns Spring, Micrometer, Kafka, PostgreSQL JDBC and both Jackson families.
+Kafka clients 4.1.2 transitively replaces the archived `org.lz4:lz4-java:1.8.0`
+with `at.yawk.lz4:lz4-java:1.10.1`; the maintainer identifies 1.10.1 as fixing the
+[decompressor information leak](https://github.com/yawkat/lz4-java/security/advisories/GHSA-cmp6-m4wj-q63q).
+No manual exclusion or duplicate compression library is needed.
+
+The BOM still manages Tomcat 11.0.24. Override `tomcat.version` to the released
+11.0.26 to include the subsequent
+[Tomcat security fixes](https://tomcat.apache.org/security-11).
+Remove this override when a future Boot BOM manages 11.0.26 or later; do not
+indefinitely hold Tomcat below a newer managed version. This is a dependency
+correction, not a policy exception. HIGH/CRITICAL and secret gates are unchanged.
+
+Only application runtime dependencies are in this remediation scope. Keep the
+pinned Kafka/PostgreSQL infrastructure images and the payment behavior unchanged.
+Exercise: compare the before/after image SBOMs, inspect Kafka's LZ4 dependency,
+and rerun `scripts/security-scan.ps1` against the rebuilt image. The final image
+scan, not the selected version number alone, determines policy compliance.

@@ -7,7 +7,7 @@ Build practical AI engineering expertise and demonstrate senior DevSecOps capabi
 ## Technology Stack
 
 - Java 25
-- Spring Boot 4.0.1
+- Spring Boot 4.0.8
 - Maven multi-module build
 - Apache Kafka
 - PostgreSQL and Flyway

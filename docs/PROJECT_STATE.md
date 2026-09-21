@@ -6,7 +6,8 @@ Updated: 2026-09-21
 
 - Maven application modules: `shared-contracts`, `transaction-api`, and `transaction-processor`.
   `payment-e2e-tests` runs the packaged applications in separate JVMs for black-box testing.
-- Parent manages Java 25 and Spring Boot 4.0.1; Maven Wrapper pins Maven 3.9.0.
+- Parent manages Java 25 and Spring Boot 4.0.8; Maven Wrapper pins Maven 3.9.0.
+  Tomcat is explicitly upgraded from the BOM's 11.0.24 to 11.0.26 for security fixes.
 - `shared-contracts` contains framework-free `contracts.v1.TransactionReceived`
   (including `correlationId`), `TransactionRejected` and `TransactionType` (`TRANSFER`).
 - `transaction-api` depends on the contracts module and implements
@@ -67,6 +68,43 @@ Updated: 2026-09-21
   provide traceability, not signing or atomic publication. See ADR 0008.
 
 ## Validated State
+
+- 2026-09-21 (M2 dependency remediation, local worktree based on 2f50ec3): checked
+  AGENTS.md/ROADMAP.md/state against the POMs, packaged dependencies, processor
+  store-before-publish/ack ordering and CI gates. Updated the Boot parent to 4.0.8
+  and Tomcat to 11.0.26; no Java business code, migrations, Kafka acknowledgement
+  policy, scanner threshold or infrastructure image changed. Aligned current
+  version references and the obsolete JUnit note in ADR 0001.
+  The packaged applications contain Spring 7.0.9, Spring Kafka 4.0.7, Kafka clients
+  4.1.2, Micrometer 1.16.7 and Jackson 3.1.5. The processor also contains PostgreSQL
+  JDBC 42.7.13 and Jackson 2.21.5. Kafka clients now brings at.yawk.lz4:lz4-java
+  1.10.1 instead of org.lz4:lz4-java 1.8.0. The API JAR contains no PostgreSQL,
+  spring-jdbc or Hibernate core dependency. The Kafka broker remains pinned to 4.1.1.
+  `.\mvnw.cmd -B -ntp clean verify` passed in 5m27s: all 94 tests (74 Surefire,
+  20 Failsafe including five E2E), zero failures/errors/skips. Both source-built
+  images and the Compose acceptance exercise passed with non-root execution,
+  accepted/duplicate/rejected outcomes, Kafka notification and down/up retention
+  followed by new consumption; isolated containers/network/volumes were cleaned up.
+  Trivy 0.74.0 completed both image scans and SBOM generation successfully:
+
+  | Image | HIGH | CRITICAL | Secrets | MEDIUM | LOW | SBOM components |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | transaction-api | 0 | 0 | 0 | 43 | 4 | 183 |
+  | transaction-processor | 0 | 0 | 0 | 33 | 4 | 194 |
+
+  The checkout secret scan also passed. Remaining MEDIUM/LOW findings are recorded,
+  not suppressed; the existing policy does not block them. No exception was added.
+  Reports/SBOMs are in `artifacts/remediation/<module>/`; source secret findings are
+  in `artifacts/remediation/source/secrets.json`. Local image tags are
+  `payments/<module>:m2-remediation`. Their revision labels identify the base commit
+  2f50ec3, not a committed remediation: this validation includes the uncommitted POM
+  change. Local source patch and image/SBOM hashes are retained in that artifacts
+  directory. CI must rebuild/validate the eventual committed revision before delivery.
+  Logs: `%TEMP%/payments-m2-remediation-verify.log`,
+  `%TEMP%/payments-m2-remediation-compose.log` and the module build/scan logs with
+  the same prefix. Local dependency remediation criteria are met; remote CodeQL/CI,
+  GHCR permissions and registry digests remain unverified. No push or publication
+  was performed during remediation. M2 is not yet complete.
 
 - 2026-09-21 (M2, local worktree based on 722df65): AGENTS.md, ROADMAP.md and this
   state agree with the module boundaries, acknowledgement ordering and M1 container
@@ -331,7 +369,7 @@ and [ADR 0005](adr/0005-durable-business-rejections.md), extended by
 - Add authentication, status lookup,
   distributed traces, business metrics, and operational dashboards. The event field
   supplies correlation metadata; it does not itself implement distributed tracing.
-- Spring Boot manages JUnit Jupiter 6.0.1, required by Spring Framework 7. AGENTS.md
+- Spring Boot manages JUnit Jupiter 6.0.3, required by Spring Framework 7. AGENTS.md
   now reflects the actual version and includes the payment-e2e-tests module.
 - Failsafe is active in `integration-test` / `verify` for `*IT` tests. All container
   tests were renamed; Surefire retains unit/MVC/contract tests. CI already invokes
@@ -341,22 +379,25 @@ and [ADR 0005](adr/0005-durable-business-rejections.md), extended by
 
 ## Next Objective
 
-Continue M2 in [the approved AI and DevSecOps roadmap](ROADMAP.md): remediate the
-HIGH/CRITICAL runtime dependency findings, preserving the payment contracts and
-acknowledgement guarantees, and rerun scans, Compose acceptance and clean verify.
+Validate M2 secure delivery on GitHub for the committed dependency remediation,
+following [the approved AI and DevSecOps roadmap](ROADMAP.md). Local tests,
+Compose acceptance, image/secret scans and SBOM generation now pass. After approval
+to push, verify the full CI workflow on that exact revision; after separate explicit
+publication approval, verify promotion of both tested archives to GHCR.
 
-The M2 pipeline is implemented, but delivery is blocked by its security policy.
-Remote CodeQL/CI execution and GHCR publication remain unverified. M1 is committed
-as 722df65; the prior green CI remains specific to commit 2937501.
+The M2 pipeline is committed as 2f50ec3; dependency remediation is locally validated.
+Remote CodeQL/CI execution and GHCR publication remain unverified.
+M1 is committed as 722df65; the prior green CI remains specific to commit 2937501.
 The outbox stays deferred per the approved roadmap. No push/publication is authorized
 by this state update; retain the user's confirmation requirement.
 
 ## Acceptance Criteria for the Next Objective
 
-- No HIGH/CRITICAL image finding or secret finding remains without an explicitly reviewed exception.
-- Updated dependencies preserve all 94 current tests and the Compose acceptance guarantees.
-- Both actual images pass the scans and retain SBOM/source-SHA evidence.
-- After approval to push, verify all jobs including CodeQL on GitHub for that exact commit.
-- Only after explicit publication approval, verify both GHCR digests against the tested bundle.
-  M2 stays in progress until these remote delivery criteria are demonstrated.
+- All GitHub validation jobs pass for the exact approved commit, including the
+  94 current tests, Compose acceptance, CodeQL and secret/image policies.
+- Both images retain successful scan reports, SBOMs and the committed source SHA.
+- Normal push/PR runs perform no registry publication. Only the explicitly approved
+  manual dispatch promotes the same verified archives and records both GHCR digests.
+- Link the successful run and digest evidence here before declaring M2 complete;
+  do not proceed to M3 while remote delivery remains unverified.
 
