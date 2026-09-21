@@ -2,7 +2,7 @@
 
 Date: 2026-09-21
 
-Status: Implemented; remote CI and registry delivery validation pending.
+Status: Implemented and validated, including GHCR delivery for cca00ee.
 
 ## Context
 
@@ -68,7 +68,8 @@ immutability, a signature or a provenance attestation.
 - Repository branch protection must require the validation jobs if merge blocking
   is desired; workflow failure alone does not configure repository protection.
 - Manual dispatch availability requires the workflow on the default branch.
-  GHCR permissions/package policy still need validation in the real repository.
+  GHCR permissions/package policy require validation in the target repository;
+  the first verified delivery is recorded below.
 - Strict gates can block delivery of the existing baseline. Findings must be
   fixed or explicitly reviewed; passing functional tests does not waive them.
 
@@ -80,6 +81,25 @@ malformed/missing reports and SARIF failure/suppression handling.
 `scripts/verify-compose.ps1` accepts both prebuilt image tags and keeps its isolated
 project, restart/data-retention checks and cleanup. See PROJECT_STATE.md for
 measured local results and outstanding remote criteria.
+
+On 2026-09-22, verified [CI run 35653382625](https://github.com/Abderraouf1990/realtime-payment-platform/actions/runs/35653382625)
+for cca00ee: build, secrets, CodeQL and image jobs succeeded, including Compose,
+both image gates and bundle creation. Publication was skipped on push, as designed.
+GHCR delivery remains subject to explicit approval and validation. A manual dispatch
+repeats all checks and promotes its own bundle; it does not promote the earlier run's
+archives. Registry digests must be verified after publication before closing M2.
+
+After explicit user approval, [manual run 35661616528](https://github.com/Abderraouf1990/realtime-payment-platform/actions/runs/35661616528)
+repeated all gates and published both images for cca00ee. Independent verification
+checked the Actions artifact digests, both archive/SBOM hashes, the remote GHCR
+manifest/config digests, source/revision labels and UID/GID 10001:10001 against the
+tested bundle. [Publication evidence](../evidence/m2-publication.json) records the
+complete image references and digests. M2 is complete for this revision; the
+non-atomic publication, unsigned-artifact and scan-coverage limitations above remain.
+
+Delivery exercise: inspect a published image by its recorded `@sha256:...` reference,
+compare its config digest with the evidence `imageId`, and explain why that digest
+differs from both the registry manifest digest and the downloadable archive hash.
 
 Reproducible exercise: run the source scan and a scan of a locally built image,
 inspect its `trivy.json` alongside `sbom.cdx.json`, and run the Python tests to

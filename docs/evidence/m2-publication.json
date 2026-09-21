@@ -1,0 +1,29 @@
+{
+  "run": 35661616528,
+  "url": "https://github.com/Abderraouf1990/realtime-payment-platform/actions/runs/35661616528",
+  "revision": "cca00eee6ed088fe394afb31ce72d97d408094fa",
+  "artifacts": {
+    "verified-images": {
+      "id": 10667679618,
+      "digest": "sha256:f992639bd114aef75afb7355f792f3c02d277ccc5ea85fcff52f9a5459c44bae"
+    },
+    "published-images": {
+      "id": 10667835254,
+      "digest": "sha256:ac850459730a92795e875872c34ca7e2f0d832db60660354e869fc27c8f20cd0"
+    }
+  },
+  "images": {
+    "transaction-api": {
+      "tag": "ghcr.io/abderraouf1990/realtime-payment-platform-transaction-api:sha-cca00eee6ed088fe394afb31ce72d97d408094fa",
+      "registryDigest": "sha256:07a331642be5ea3f0c75d7c60de355fd36439814fc2d36837cffe192e9279992",
+      "imageId": "sha256:70e5b814d66db74b838c7efbcefd6256e608aef4bdbab363b198912ce7e165fe",
+      "user": "10001:10001"
+    },
+    "transaction-processor": {
+      "tag": "ghcr.io/abderraouf1990/realtime-payment-platform-transaction-processor:sha-cca00eee6ed088fe394afb31ce72d97d408094fa",
+      "registryDigest": "sha256:7999d5611fd1452ceeef66dd64c8fb381b281a2cf854596993d4b92404e3d8db",
+      "imageId": "sha256:75532ca0418fb1a3e83525a2e633479b3cf18204c792c25657afe980ec9d1147",
+      "user": "10001:10001"
+    }
+  }
+}

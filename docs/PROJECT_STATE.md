@@ -1,6 +1,6 @@
 # Project State
 
-Updated: 2026-09-21
+Updated: 2026-09-22
 
 ## Current Implementation
 
@@ -68,6 +68,71 @@ Updated: 2026-09-21
   provide traceability, not signing or atomic publication. See ADR 0008.
 
 ## Validated State
+
+- 2026-09-22 (M2 completed): following explicit user authorization to publish both
+  images, dispatched CI on the already-pushed `codex/build-mvp` revision
+  `cca00eee6ed088fe394afb31ce72d97d408094fa`, with `publish=true` and that exact
+  `approved_sha`. [Manual run 35661616528](https://github.com/Abderraouf1990/realtime-payment-platform/actions/runs/35661616528)
+  succeeded for all five jobs, including `publish`. The run repeated all 94 Maven
+  tests (zero failures/errors/skips), nine Python tests, CodeQL, secret checks,
+  image builds, Compose acceptance, both image gates and SBOM generation.
+  The publication job loaded its own verified archives and pushed both images
+  without rebuilding. No Git push or new source commit was needed.
+
+  | Image repository (under ghcr.io/abderraouf1990/) | Verified registry digest |
+  | --- | --- |
+  | realtime-payment-platform-transaction-api | sha256:07a331642be5ea3f0c75d7c60de355fd36439814fc2d36837cffe192e9279992 |
+  | realtime-payment-platform-transaction-processor | sha256:7999d5611fd1452ceeef66dd64c8fb381b281a2cf854596993d4b92404e3d8db |
+
+  Both use tag `sha-cca00eee6ed088fe394afb31ce72d97d408094fa`.
+  Independently downloaded the run's `verified-images` and `published-images`
+  artifacts and checked their archive digests against GitHub's metadata. Checked
+  each image archive and SBOM hash against the bundle manifest. Read both GHCR
+  tag manifests and config blobs: registry digests match the publication record;
+  config digests match the tested image IDs; revision/source labels match the
+  approved commit/repository; both run as UID/GID `10001:10001`.
+  [Recorded evidence](evidence/m2-publication.json) retains the run URL, complete
+  tags, registry/config digests and artifact IDs/digests. The verified bundle is
+  artifact 10667679618, retained until 2026-09-28T22:19:33Z; the publication record
+  is artifact 10667835254. Local verification files are in `artifacts/m2-publication/`.
+  This demonstrates M2 delivery for this revision, not signed provenance, atomic
+  publication of the pair, absence of all vulnerabilities or production readiness.
+  No application code or workflow change was required. Documentation is updated;
+  no documentation commit or Git push was performed. M3 is the next milestone.
+
+- 2026-09-22 (M2 remote validation): checked the clean local checkout and remote
+  `codex/build-mvp`; both point to `cca00eee6ed088fe394afb31ce72d97d408094fa`.
+  AGENTS.md, the module POMs and implementation agree on Boot 4.0.8/Tomcat 11.0.26,
+  module separation and commit-before-publication/ack ordering. The remaining
+  documentation drift was the now-obsolete statement that remote CI was unverified.
+  [CI run 35653382625](https://github.com/Abderraouf1990/realtime-payment-platform/actions/runs/35653382625)
+  completed successfully for that exact commit on a push (2026-09-21 UTC).
+  Inspected job/step results and authenticated GitHub job logs:
+  - `build` (106510934547): `./mvnw clean verify` succeeded; 94 tests, zero
+    failures/errors/skips, including five E2E. Nine Python gate tests and actionlint passed.
+  - `secrets` (106510934126): checkout scan and redacted report upload succeeded.
+  - `code-analysis` (106510934403): CodeQL extraction, analysis, blocking gate and
+    SARIF artifact upload succeeded.
+  - `images` (106512165801): both builds, Compose acceptance including restart/data
+    retention, both security gates, SBOM generation and commit-bound bundle creation
+    succeeded. No security threshold was relaxed.
+  - `publish` (106513047160): skipped, as expected for a push; this run did not publish.
+
+  GitHub lists four non-expired artifacts: `secret-scan`, `code-analysis`,
+  `image-security` and `verified-images`. The latter is artifact 10663397461,
+  with archive digest `sha256:481b185948507e7f1401171be65060f3e46f2c84fc4fb1fd5d8aa53c7ad7e5a5`,
+  expiring 2026-09-28T20:54:45Z. This is an Actions artifact digest, not a GHCR image
+  digest. Job logs and artifact metadata establish remote validation; registry
+  publication, registry permissions and registry digests remain unverified.
+  The default branch is `codex/build-mvp` and already contains the manual workflow.
+  Prepared dispatch: that ref, `publish=true`,
+  `approved_sha=cca00eee6ed088fe394afb31ce72d97d408094fa`. It will rerun all checks
+  and publish only its own run's verified bundle, not reuse the previous push run's
+  archives. If the ref advances, recheck the revision and approval before dispatch.
+  No workflow was dispatched and no commit, push or publication was performed here.
+  Only documentation changed; existing remote test evidence was checked rather
+  than repeating the unchanged Java build locally. M2 awaits publication approval
+  and registry verification; do not start M3.
 
 - 2026-09-21 (M2 dependency remediation, local worktree based on 2f50ec3): checked
   AGENTS.md/ROADMAP.md/state against the POMs, packaged dependencies, processor
@@ -379,25 +444,27 @@ and [ADR 0005](adr/0005-durable-business-rejections.md), extended by
 
 ## Next Objective
 
-Validate M2 secure delivery on GitHub for the committed dependency remediation,
-following [the approved AI and DevSecOps roadmap](ROADMAP.md). Local tests,
-Compose acceptance, image/secret scans and SBOM generation now pass. After approval
-to push, verify the full CI workflow on that exact revision; after separate explicit
-publication approval, verify promotion of both tested archives to GHCR.
+M3 in [the approved roadmap](ROADMAP.md): implement a reproducible local Kubernetes
+deployment with Helm, using the M2 application images pinned by their verified GHCR
+digests. Preserve the HTTP -> Kafka -> processor -> PostgreSQL flow and documented
+manual failure recovery. Provide meaningful probes, resource limits and restricted
+workload permissions; demonstrate a controlled upgrade and rollback.
 
-The M2 pipeline is committed as 2f50ec3; dependency remediation is locally validated.
-Remote CodeQL/CI execution and GHCR publication remain unverified.
-M1 is committed as 722df65; the prior green CI remains specific to commit 2937501.
-The outbox stays deferred per the approved roadmap. No push/publication is authorized
-by this state update; retain the user's confirmation requirement.
+M2 is complete for cca00ee through publication run 35661616528 and independent
+registry verification. The outbox remains deferred. The publication authorization
+covered these two images at this SHA; it does not authorize new Git pushes, future
+publications or cloud provisioning. No M3 implementation was started in this task.
 
 ## Acceptance Criteria for the Next Objective
 
-- All GitHub validation jobs pass for the exact approved commit, including the
-  94 current tests, Compose acceptance, CodeQL and secret/image policies.
-- Both images retain successful scan reports, SBOMs and the committed source SHA.
-- Normal push/PR runs perform no registry publication. Only the explicitly approved
-  manual dispatch promotes the same verified archives and records both GHCR digests.
-- Link the successful run and digest evidence here before declaring M2 complete;
-  do not proceed to M3 while remote delivery remains unverified.
+- Document and reproduce installation into a local Kubernetes cluster with Helm;
+  use pinned application/infrastructure images and injected development secrets.
+- Configure resource requests/limits, non-root containers and restricted permissions;
+  keep database access confined to the processor.
+- Probes reflect the actual health they check; do not equate a live processor JVM
+  with a healthy Kafka listener. Document any remaining health limitation.
+- Verify accepted/duplicate/rejected outcomes and persistence through the deployed
+  flow, then demonstrate a controlled Helm upgrade and rollback.
+- Record executed commands, results and cleanup instructions; no cloud deployment
+  or production-readiness claim is implied.
 

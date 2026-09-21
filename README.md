@@ -489,7 +489,14 @@ The dependency remediation uses Boot 4.0.8's BOM plus a targeted Tomcat 11.0.26
 override; see the rationale and override removal condition in ADR 0008. Kafka
 clients are now 4.1.2 while the pinned local/test broker remains 4.1.1. The local
 image scans pass the blocking policy; remaining MEDIUM/LOW findings are visible
-in the reports. This does not establish a passing remote CI run or GHCR delivery.
+in the reports. [CI run 35653382625](https://github.com/Abderraouf1990/realtime-payment-platform/actions/runs/35653382625)
+passed for commit cca00ee, including CodeQL, Compose, image/secret gates and SBOMs.
+The publication job was skipped on that push. After explicit approval,
+[manual run 35661616528](https://github.com/Abderraouf1990/realtime-payment-platform/actions/runs/35661616528)
+repeated every gate and published both images. Their remote manifests/configs,
+revision labels and non-root user match the tested bundle. M2 is complete for cca00ee;
+[publication evidence](docs/evidence/m2-publication.json) records both complete
+image references, registry digests and image IDs for reuse by M3.
 
 Run policy tests and a checkout secret scan from the repository root
 (Python 3.11+, PowerShell and Docker):
@@ -523,5 +530,9 @@ Successful publication records registry digests in the `published-images` run
 artifact. Tags are `ghcr.io/<owner>/<repository>-transaction-api:sha-<full-sha>`
 and the equivalent `-transaction-processor` tag. Use the recorded digest for an
 immutable image reference. Publication of the pair is not atomic, and the SBOMs
-are workflow artifacts rather than signed OCI attestations. Remote CI and registry
-delivery must be verified before M2 can be called complete.
+are workflow artifacts rather than signed OCI attestations. After an approved manual
+dispatch, compare `published-images` digests with the registry, then compare the
+remote image config IDs with `manifest.json` in that run's verified bundle and
+check the revision labels. Archive hashes and registry digests are different values.
+The manual run repeats all validation jobs and
+promotes its own archives. Repeat this verification for each newly authorized delivery.
