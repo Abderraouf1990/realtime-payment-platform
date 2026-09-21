@@ -5,6 +5,16 @@ on:
     branches: [main, codex/build-mvp]
   pull_request:
     branches: [main, codex/build-mvp]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish verified images to GHCR (explicit approval)'
+        type: boolean
+        default: false
+      approved_sha:
+        description: 'Full commit SHA approved for publication; must match selected ref'
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -12,14 +22,15 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
       - name: Set up Java 25
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: '25'
@@ -32,12 +43,177 @@ jobs:
       - name: Build and test all modules
         run: ./mvnw clean verify
 
+      - name: Test security and promotion gates
+        run: python -m unittest discover -s scripts -p 'test_*.py' -v
+
+      - name: Validate workflow syntax and expressions
+        run: >-
+          docker run --rm -v "$PWD:/repo:ro" -w /repo
+          rhysd/actionlint:1.7.7@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9
+          -color .github/workflows/ci.yml
+
       - name: Upload test reports on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: test-reports
           path: |
             **/target/surefire-reports/**
             **/target/failsafe-reports/**
           if-no-files-found: ignore
+
+  secrets:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Scan checkout for secrets
+        shell: pwsh
+        run: ./scripts/security-scan.ps1 -SourceOnly
+      - name: Upload redacted findings
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: secret-scan
+          path: artifacts/security/secrets.json
+          if-no-files-found: warn
+
+  code-analysis:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: github/codeql-action/init@d8073367669608af8fbcc5f63dd0a0d52bb90cff # v4
+        with:
+          languages: java-kotlin
+          build-mode: manual
+          queries: security-extended
+      - name: Compile application code for CodeQL
+        run: |
+          chmod +x ./mvnw
+          ./mvnw -B -ntp -pl transaction-api,transaction-processor -am -Dmaven.test.skip=true clean package
+      - uses: github/codeql-action/analyze@d8073367669608af8fbcc5f63dd0a0d52bb90cff # v4
+        with:
+          output: artifacts/codeql
+          upload: never
+          upload-database: false
+      - name: Block on code findings
+        run: python scripts/security_gate.py sarif artifacts/codeql/*.sarif
+      - name: Upload CodeQL reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: code-analysis
+          path: artifacts/codeql/*.sarif
+          if-no-files-found: warn
+
+  images:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Build commit-labelled images
+        env:
+          REVISION: ${{ github.sha }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          for module in transaction-api transaction-processor; do
+            docker build --file "$module/Dockerfile" \
+              --label "org.opencontainers.image.revision=$REVISION" \
+              --label "org.opencontainers.image.source=https://github.com/$REPOSITORY" \
+              --tag "payments/$module:$REVISION" .
+          done
+      - name: Exercise these exact images with Compose
+        shell: pwsh
+        env:
+          REVISION: ${{ github.sha }}
+        run: |
+          ./scripts/verify-compose.ps1 -ApiImage "payments/transaction-api:$env:REVISION" -ProcessorImage "payments/transaction-processor:$env:REVISION"
+      - name: Scan runtime dependencies, OS packages and secrets; generate SBOMs
+        shell: pwsh
+        env:
+          REVISION: ${{ github.sha }}
+        run: |
+          $failures = @()
+          foreach ($module in @('transaction-api', 'transaction-processor')) {
+            try {
+              ./scripts/security-scan.ps1 -Image "payments/${module}:$env:REVISION" -OutputDirectory "artifacts/images/$module"
+            } catch { $failures += "$module scan failed: $_" }
+          }
+          if ($failures.Count) { throw ($failures -join "`n") }
+      - name: Bind image archives and SBOMs to commit
+        env:
+          REVISION: ${{ github.sha }}
+          REPOSITORY: ${{ github.repository }}
+        run: python scripts/image_bundle.py create --revision "$REVISION" --repository "$REPOSITORY"
+      - name: Upload scan reports and SBOMs even on policy failure
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: image-security
+          path: |
+            artifacts/images/*/trivy.json
+            artifacts/images/*/sbom.cdx.json
+          if-no-files-found: warn
+      - name: Preserve verified images for promotion
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verified-images
+          compression-level: 0
+          retention-days: 7
+          path: |
+            artifacts/images/manifest.json
+            artifacts/images/*/image.tar
+            artifacts/images/*/sbom.cdx.json
+          if-no-files-found: error
+
+  publish:
+    needs: [build, secrets, code-analysis, images]
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.publish &&
+      inputs.approved_sha == github.sha &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/build-mvp')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: verified-images
+          path: artifacts/images
+      - name: Authenticate with job-scoped token
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$ACTOR" --password-stdin
+      - name: Promote verified archives without rebuilding
+        env:
+          REVISION: ${{ github.sha }}
+          REPOSITORY: ${{ github.repository }}
+        run: python scripts/image_bundle.py publish --revision "$REVISION" --repository "$REPOSITORY"
+      - name: Record registry digests
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: published-images
+          path: artifacts/images/published-images.json
+          if-no-files-found: warn
+      - name: Logout
+        if: always()
+        run: docker logout ghcr.io

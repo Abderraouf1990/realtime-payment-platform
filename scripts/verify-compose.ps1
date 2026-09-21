@@ -1,3 +1,5 @@
+param([string]$ApiImage, [string]$ProcessorImage)
+
 # Isolated acceptance exercise: only this script's project and volumes are removed.
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path $PSScriptRoot -Parent
@@ -11,6 +13,8 @@ $testEnv = @{
     TRANSACTIONS_RECEIVED_TOPIC = 'transactions.received'; TRANSACTIONS_REJECTED_TOPIC = 'transactions.rejected'
 }
 $savedEnv = @{}
+$overrideFile = $null
+if ([bool]$ApiImage -ne [bool]$ProcessorImage) { throw 'Supply both application images or neither' }
 
 function Invoke-Compose([string[]]$CommandArgs) {
     # Windows PowerShell treats redirected native stderr as ErrorRecords, even for progress.
@@ -51,14 +55,22 @@ function Submit([string]$Id, [decimal]$Amount, [string]$Currency = 'EUR') {
 }
 
 try {
+    if ($ApiImage) {
+        $overrideFile = [IO.Path]::GetTempFileName()
+        @{ services = @{
+            'transaction-api' = @{ image=$ApiImage; pull_policy='never' }
+            'transaction-processor' = @{ image=$ProcessorImage; pull_policy='never' }
+        } } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $overrideFile -Encoding UTF8
+        $composeArgs += @('--file', $overrideFile)
+    }
     foreach ($name in $testEnv.Keys) {
         $savedEnv[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
         [Environment]::SetEnvironmentVariable($name, $testEnv[$name], 'Process')
     }
     Invoke-Compose @('config', '--quiet') | Out-Null
-    Invoke-Compose @('build') | Write-Output
+    if (!$ApiImage) { Invoke-Compose @('build') | Write-Output }
     # --wait checks API/infra health; processor running alone is not proof of listener health.
-    Invoke-Compose @('up', '-d', '--wait', '--wait-timeout', '180') | Write-Output
+    Invoke-Compose @('up', '-d', '--no-build', '--wait', '--wait-timeout', '180') | Write-Output
     $binding = (Invoke-Compose @('port', 'transaction-api', '8080') | Select-Object -Last 1).Trim()
     $baseUrl = "http://$binding"
     Wait-For { (Invoke-Compose @('logs', '--no-color', 'transaction-processor')) -match 'Started TransactionProcessorApplication' } 'processor startup and migrations'
@@ -96,7 +108,7 @@ try {
 
     # Keep named volumes across a real down/up, then verify persisted data and consumer recovery.
     Invoke-Compose @('down') | Write-Output
-    Invoke-Compose @('up', '-d', '--wait', '--wait-timeout', '180') | Write-Output
+    Invoke-Compose @('up', '-d', '--no-build', '--wait', '--wait-timeout', '180') | Write-Output
     $binding = (Invoke-Compose @('port', 'transaction-api', '8080') | Select-Object -Last 1).Trim()
     $baseUrl = "http://$binding"
     Assert-Equal (Read-Sql 'SELECT count(*) FROM ledger_transactions') '1' 'ledger survives restart'
@@ -112,5 +124,6 @@ try {
         Invoke-Compose @('down', '--volumes', '--remove-orphans') | Write-Output
     } finally {
         foreach ($name in $savedEnv.Keys) { [Environment]::SetEnvironmentVariable($name, $savedEnv[$name], 'Process') }
+        if ($overrideFile) { Remove-Item -LiteralPath $overrideFile }
     }
 }

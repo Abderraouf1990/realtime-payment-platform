@@ -7,3 +7,5 @@ target/
 .vscode/
 .env
 *.log
+artifacts/
+__pycache__/

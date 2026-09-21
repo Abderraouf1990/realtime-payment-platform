@@ -474,3 +474,48 @@ Spring Boot manages JUnit Jupiter 6.0.1, as required by Spring Framework 7.
 Rejection audit integration tests include V1-to-V2 migration, null/decimal preservation,
 idempotence and a rejection COMMIT failure with no premature Kafka acknowledgement.
 Automated recovery, audit access control and operational dashboards remain future work.
+
+## Secure image delivery (M2)
+
+CI now prepares tested, commit-labelled application images, CodeQL Java
+`security-extended` analysis, Trivy secret/OS/JAR scans and CycloneDX SBOMs.
+The delivery policy blocks every code/secret finding, HIGH/CRITICAL vulnerability
+(even without a fix), failed check or unavailable scanner. No exceptions are
+configured. See [ADR 0008](docs/adr/0008-secure-image-delivery.md) for coverage,
+permissions, artifact handling and limitations, and
+[PROJECT_STATE](docs/PROJECT_STATE.md) for actual validation results.
+
+Run policy tests and a checkout secret scan from the repository root
+(Python 3.11+, PowerShell and Docker):
+
+```powershell
+python -m unittest discover -s scripts -p 'test_*.py' -v
+.\scripts\security-scan.ps1 -SourceOnly
+```
+
+For a locally built image, run the same security check and generate its SBOM:
+
+```powershell
+.\scripts\security-scan.ps1 -Image realtime-payment-platform-transaction-api -OutputDirectory artifacts/images/transaction-api
+```
+
+Use the tag shown by `docker compose images` if a custom Compose project name
+was used. Reports are under `artifacts/` (ignored by Git). The command fails when
+the policy blocks the image but still generates its SBOM if the scanner succeeds.
+No scan result is a guarantee that an image has no vulnerabilities.
+
+CI exercises its already-built images with `scripts/verify-compose.ps1 -ApiImage
+<api-tag> -ProcessorImage <processor-tag>`, then preserves those exact archives and
+SBOM hashes. Normal pushes and PRs never publish. After explicit owner approval,
+select the CI workflow's manual dispatch on an allowed branch, set `publish=true`
+and provide the selected ref's full SHA as `approved_sha`. The workflow must be
+present on the default branch for manual dispatch to be available. A wrong SHA
+skips publication. All checks must pass in that run before GHCR write access is
+used; no new secret/PAT is needed.
+
+Successful publication records registry digests in the `published-images` run
+artifact. Tags are `ghcr.io/<owner>/<repository>-transaction-api:sha-<full-sha>`
+and the equivalent `-transaction-processor` tag. Use the recorded digest for an
+immutable image reference. Publication of the pair is not atomic, and the SBOMs
+are workflow artifacts rather than signed OCI attestations. Remote CI and registry
+delivery must be verified before M2 can be called complete.

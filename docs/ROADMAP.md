@@ -1,6 +1,6 @@
 # Roadmap: AI and DevSecOps Demonstrator
 
-Updated: 2026-09-19
+Updated: 2026-09-21
 
 ## Primary objective
 
@@ -12,7 +12,7 @@ Build practical expertise in AI engineering and demonstrate senior DevSecOps cap
 | --- | --- | --- | --- |
 | M0 | Payment walking skeleton and reliability baseline | Completed baseline | Ledger, durable rejections, Kafka notifications and E2E; CI passed for 2937501. Known limitations remain in PROJECT_STATE.md. |
 | M1 | Containerize API and processor | Completed locally | Source-only image build and scripts/verify-compose.ps1 passed: non-root, accepted payment, duplicate, durable rejection, Kafka event and data retained across down/up. See PROJECT_STATE.md for evidence and CI limits. |
-| M2 | Secure image delivery | Next | CI tests, code/dependency/secret analysis, image scans, SBOM and GHCR images traceable to commit; document blocking rules and any justified exceptions. |
+| M2 | Secure image delivery | In progress; delivery blocked | Pipeline and blocking policy implemented; local dependency scans flag HIGH/CRITICAL findings. Remote CI and authorized GHCR publication remain unverified. See PROJECT_STATE.md. |
 | M3 | Local Kubernetes deployment | Planned | Reproducible Helm installation, resource requests/limits, restricted workload permissions, injected secrets, meaningful probes, controlled upgrade and rollback exercise. |
 | M4 | Observability and incident exercises | Planned | Structured logs, metrics, distributed traces, listener-state monitoring, dashboards and runbooks; reproduce PostgreSQL outage, Kafka publication failure and malformed input. |
 | M5 | Secure, evaluated incident assistant | Planned | RAG over versioned runbooks/ADRs; read-only incident evidence; sourced structured diagnosis and abstention; 15–20 evaluation cases including prompt injection; measure quality, latency and cost; authenticated access and redaction. |
@@ -22,10 +22,11 @@ M1–M4 prepare the environment and evidence for M5. Keep these milestones bound
 
 ## Current task: M2
 
-Implement the secure image-delivery pipeline for the two application images: retain tests,
-add code/dependency/secret analysis, image scans and SBOMs, and prepare GHCR publication
-with commit traceability and documented blocking rules. Validate the pipeline before
-claiming M2 complete. Follow the user's existing approval requirement before push or publication.
+Remediate the application-image dependency findings reported by the M2 gates, then
+repeat scans, Compose acceptance and clean verify. The delivery pipeline is implemented;
+remote CodeQL/CI and GHCR publication still require validation before M2 is complete.
+Follow the user's existing approval requirement before push or publication. Do not
+advance to M3 or weaken the gates to bypass these findings.
 
 ## Deferred work
 
@@ -49,3 +50,6 @@ claiming M2 complete. Follow the user's existing approval requirement before pus
 - 2026-09-19: User reaffirmed AI expertise and DevSecOps demonstration as the primary objective.
 - 2026-09-19: User approved containerization → secure delivery → local Kubernetes → observability → incident assistant. This supersedes the earlier outbox-first next objective. Outbox remains deferred reliability work.
 - 2026-09-19: Roadmap and session continuity instructions recorded in Git; M1 is next, not yet implemented.
+- 2026-09-21: M1 is committed as 722df65. M2 pipeline implemented locally; functional
+  checks pass but dependency findings block delivery. No exception, push or publication
+  authorized. Keep the approved milestone order and finish M2 before M3.

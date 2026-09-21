@@ -1,6 +1,6 @@
 # Project State
 
-Updated: 2026-09-19
+Updated: 2026-09-21
 
 ## Current Implementation
 
@@ -58,8 +58,48 @@ Updated: 2026-09-19
 - GitHub Actions CI runs `./mvnw clean verify` on pushes and pull requests targeting
   `main` and `codex/build-mvp`, using Temurin 25, Maven caching, and read-only contents
   permissions. Surefire/Failsafe reports are uploaded only on failure.
+- M2 workflow changes add CodeQL Java security analysis, checkout secret scanning,
+  labelled image builds, Compose acceptance of those images, OS/JAR/secret scans and
+  CycloneDX SBOMs. Actions/tools are pinned. Strict gates block every code/secret
+  finding, HIGH/CRITICAL vulnerability and scanner failure; no exception is configured.
+  Only an explicit manual dispatch for an approved full SHA can publish both verified
+  image archives to GHCR. Only that job has packages:write. Hashes and registry digests
+  provide traceability, not signing or atomic publication. See ADR 0008.
 
 ## Validated State
+
+- 2026-09-21 (M2, local worktree based on 722df65): AGENTS.md, ROADMAP.md and this
+  state agree with the module boundaries, acknowledgement ordering and M1 container
+  implementation. M1 is now committed; the earlier M1 entry below is historical.
+  Corrected Docker context rules so allowed parent directories cannot reinclude
+  host targets/tests/private files. Both application images rebuilt successfully.
+  `.\mvnw.cmd clean verify` passed in 4m35s: 94 tests (74 unit/contract/MVC and 20 IT,
+  including five E2E), zero failures/errors/skips. Log: `%TEMP%/payments-m2-clean-verify.log`.
+  The Compose acceptance script using the prebuilt, revision-labelled images passed
+  non-root execution, HTTP acceptance, identical retry, durable rejection, Kafka
+  notification and down/up data retention/new consumption. Cleanup completed for
+  its isolated project. Log: `%TEMP%/payments-m2-compose.log`.
+  Nine Python policy/promotion tests passed, including a tampered archive preventing
+  every Docker operation. Pinned actionlint 1.7.7 reported no workflow diagnostics.
+  The checkout secret scan passed; its offline mode avoids irrelevant Maven POM
+  resolution (the initial online attempt hit Maven Central HTTP 429).
+  These are local results, not a GitHub CI run for the new M2 workflow.
+  Trivy 0.74.0 completed both image scans using its downloaded vulnerability/Java
+  databases: API has 22 HIGH + 8 CRITICAL findings; processor has 20 HIGH + 2 CRITICAL.
+  These are per-image advisory occurrences, not 52 distinct vulnerabilities or
+  demonstrated exploits. All blocking findings are in Java dependencies; no image
+  secret was detected. Both scan commands correctly failed the policy (exit 1).
+  Affected dependencies include Boot 4.0.1, Spring 7.0.2, Kafka clients 4.1.1,
+  Micrometer 1.16.1, LZ4 1.8.0 and Jackson; Tomcat 11.0.15 is API-specific, while
+  PostgreSQL JDBC/Spring Data and Jackson 2 also appear in the processor report.
+  No dependency upgrade or security exception was silently introduced.
+  Sanitized reports: `artifacts/images/<module>/trivy.json`; CycloneDX inventories:
+  `artifacts/images/<module>/sbom.cdx.json` (181 API / 194 processor components).
+  These generated local artifacts are ignored by Git; CI uploads the equivalent
+  reports/SBOMs even on policy failure but withholds the verified image bundle.
+  Delivery remains blocked. CodeQL execution on GitHub, successful bundle promotion
+  and GHCR package permissions/digests have not been verified. No push,
+  registry authentication or publication was performed.
 
 - 2026-09-19 (M1): Checked AGENTS.md/ROADMAP.md against module POMs, processor ordering
   and Compose. Corrected JUnit wording to Boot-managed Jupiter 6 and documented the
@@ -301,19 +341,22 @@ and [ADR 0005](adr/0005-durable-business-rejections.md), extended by
 
 ## Next Objective
 
-M2 in [the approved AI and DevSecOps roadmap](ROADMAP.md): implement a secure image-delivery
-pipeline for the two application images (tests, code/dependency/secret analysis, image
-scans, SBOM and commit-traceable GHCR delivery), with documented blocking rules.
+Continue M2 in [the approved AI and DevSecOps roadmap](ROADMAP.md): remediate the
+HIGH/CRITICAL runtime dependency findings, preserving the payment contracts and
+acknowledgement guarantees, and rerun scans, Compose acceptance and clean verify.
 
-M1 is completed locally; the prior green CI remains specific to commit 2937501.
+The M2 pipeline is implemented, but delivery is blocked by its security policy.
+Remote CodeQL/CI execution and GHCR publication remain unverified. M1 is committed
+as 722df65; the prior green CI remains specific to commit 2937501.
 The outbox stays deferred per the approved roadmap. No push/publication is authorized
 by this state update; retain the user's confirmation requirement.
 
 ## Acceptance Criteria for the Next Objective
 
-- Keep clean verify and exercise image construction/Compose acceptance in CI.
-- Run code, dependency, secret and image analysis with explicit failure thresholds.
-- Generate SBOMs and associate both images with their source commit.
-- Prepare minimally privileged GHCR publication; validate delivery only after authorized publication.
-- Record measured results, blocking findings and justified exceptions without claiming production readiness.
+- No HIGH/CRITICAL image finding or secret finding remains without an explicitly reviewed exception.
+- Updated dependencies preserve all 94 current tests and the Compose acceptance guarantees.
+- Both actual images pass the scans and retain SBOM/source-SHA evidence.
+- After approval to push, verify all jobs including CodeQL on GitHub for that exact commit.
+- Only after explicit publication approval, verify both GHCR digests against the tested bundle.
+  M2 stays in progress until these remote delivery criteria are demonstrated.
 
