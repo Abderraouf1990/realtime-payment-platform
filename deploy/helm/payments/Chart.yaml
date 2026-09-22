@@ -1,0 +1,7 @@
+apiVersion: v2
+name: payments
+description: Local single-node payment platform demonstration
+type: application
+version: 0.1.0
+appVersion: "cca00ee"
+kubeVersion: ">=1.30.0-0"

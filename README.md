@@ -475,6 +475,75 @@ Rejection audit integration tests include V1-to-V2 migration, null/decimal prese
 idempotence and a rejection COMMIT failure with no premature Kafka acknowledgement.
 Automated recovery, audit access control and operational dashboards remain future work.
 
+## Local Kubernetes (M3)
+
+The [Helm chart](deploy/helm/payments) runs the M2 application images by verified
+GHCR digest, Kafka 4.1.1 and PostgreSQL 17.6. See
+[ADR 0009](docs/adr/0009-local-kubernetes.md) for security, probes and recovery limits.
+No application rebuild or image publication is needed.
+
+Prerequisites on Windows: Docker Desktop with Linux containers (the validation
+machine provides about 8 GB RAM), PowerShell, Helm 3 and kubectl compatible with
+Kubernetes 1.34. Allow disk space for the node and application images. The script
+downloads kind 0.33.0 to ignored `artifacts/tools` and verifies its SHA-256; the
+node image is pinned to Kubernetes 1.34.11 by digest. Internet access is needed
+for the first downloads, including the public GHCR images.
+
+From the repository root:
+
+```powershell
+# Complete isolated acceptance exercise, with automatic cleanup on success/failure:
+.\scripts\verify-kubernetes.ps1
+
+# Keep the cluster for hands-on inspection (also retained if a check fails):
+.\scripts\verify-kubernetes.ps1 -KeepCluster
+```
+
+The script prints the unique cluster name and private kubeconfig path. It creates
+an enforced Pod Security `restricted` namespace, injects a generated development
+database Secret through stdin, runs server-side admission checks and installs
+the chart with `helm install --wait --wait-for-jobs`. It does not change the
+existing Kubernetes context. Its loopback port-forward is stopped on exit.
+Raw local evidence stays in the ignored `artifacts/<cluster-name>/` directory;
+do not publish its kubeconfig.
+
+Acceptance covers HTTP to ledger, identical retry, conflict without mutation,
+negative amount and non-EUR rejection, Kafka rejection notifications, non-root
+runtime identity and restricted application settings. It then upgrades the
+`rolloutMarker` annotation, processes a payment, rolls back and processes another.
+Finally it recreates the Kafka/PostgreSQL pods, checks PVC retention, manually
+restarts the processor and verifies another payment. The deployments use Recreate
+and incur downtime. This is configuration rollback with unchanged image digests,
+not a database migration or application-version rollback.
+
+For the reproducible learning exercise, retain the cluster and copy its printed
+name/path into the following variables (all commands explicitly target it):
+
+```powershell
+$clusterName = '<printed-cluster-name>'
+$localKubeconfig = '<printed-kubeconfig-path>'
+$localContext = "kind-$clusterName"
+kubectl --kubeconfig $localKubeconfig --context $localContext -n payments get pods,pvc
+helm --kubeconfig $localKubeconfig --kube-context $localContext -n payments history payments
+helm --kubeconfig $localKubeconfig --kube-context $localContext -n payments upgrade payments ./deploy/helm/payments --set-string rolloutMarker=manual --wait --wait-for-jobs
+helm --kubeconfig $localKubeconfig --kube-context $localContext -n payments rollback payments 1 --wait --wait-for-jobs
+kubectl --kubeconfig $localKubeconfig --context $localContext -n payments port-forward service/payments-transaction-api 8080:8080 --address 127.0.0.1
+# Ctrl+C stops the foreground port-forward. Cleanup deletes this cluster's data:
+& .\artifacts\tools\kind.exe delete cluster --name $clusterName --kubeconfig $localKubeconfig
+```
+
+API probes report Actuator liveness/readiness, PostgreSQL probes server availability
+and Kafka readiness executes a broker request. The published processor has no
+listener-health endpoint; a Ready pod is not proof that its consumer is running.
+After a technical failure, repair the dependency and explicitly run
+`kubectl ... rollout restart deployment/payments-transaction-processor`, using
+the same kubeconfig/context/namespace arguments above. M4 adds listener monitoring.
+Application filesystems are read-only; Kafka/tool initialization retains a writable
+image filesystem. The chart uses an existing Secret (`database`, `username`,
+`password` keys); only the processor receives database credentials. This single-node
+exercise provides neither high availability nor network isolation or TLS. PVCs
+survive pod recreation, but deleting kind deletes their data.
+
 ## Secure image delivery (M2)
 
 CI now prepares tested, commit-labelled application images, CodeQL Java

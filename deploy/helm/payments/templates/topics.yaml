@@ -1,0 +1,32 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-topics-{{ .Release.Revision }}
+  labels:
+    {{- include "payments.labels" . | nindent 4 }}
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels: {app: {{ .Release.Name }}-topics}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "payments.podSecurity" 1000 | nindent 8 }}
+      containers:
+        - name: topics
+          image: {{ .Values.kafka.image | quote }}
+          securityContext:
+            {{- include "payments.containerSecurity" . | nindent 12 }}
+          resources:
+            {{- include "payments.toolResources" . | nindent 12 }}
+          env: [{name: KAFKA_HEAP_OPTS, value: "-Xms16m -Xmx128m"}]
+          command: [sh, -ec]
+          args:
+            - |
+              until /opt/kafka/bin/kafka-topics.sh --bootstrap-server {{ .Release.Name }}-kafka:9092 --list; do sleep 3; done
+              for topic in transactions.received transactions.rejected; do
+                /opt/kafka/bin/kafka-topics.sh --bootstrap-server {{ .Release.Name }}-kafka:9092 --create --if-not-exists --topic "$topic" --partitions 3 --replication-factor 1
+              done

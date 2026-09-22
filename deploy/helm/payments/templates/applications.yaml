@@ -1,0 +1,115 @@
+{{- range $component := list "api" "processor" }}
+{{- $settings := index $.Values $component }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $.Release.Name }}-transaction-{{ $component }}
+  labels:
+    {{- include "payments.labels" $ | nindent 4 }}
+spec:
+  replicas: 1
+  # Deliberate local downtime; no overlap of processor instances during the exercise.
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: {{ $.Release.Name }}-transaction-{{ $component }}}
+  template:
+    metadata:
+      labels: {app: {{ $.Release.Name }}-transaction-{{ $component }}}
+      annotations:
+        payments.example/rollout-marker: {{ $.Values.rolloutMarker | quote }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "payments.podSecurity" 10001 | nindent 8 }}
+      terminationGracePeriodSeconds: 30
+      initContainers:
+        - name: wait-for-topics
+          image: {{ $.Values.kafka.image | quote }}
+          securityContext:
+            {{- include "payments.containerSecurity" $ | nindent 12 }}
+          resources:
+            {{- include "payments.toolResources" $ | nindent 12 }}
+          env: [{name: KAFKA_HEAP_OPTS, value: "-Xms16m -Xmx128m"}]
+          command: [sh, -ec]
+          args:
+            - |
+              for topic in transactions.received transactions.rejected; do
+                until /opt/kafka/bin/kafka-topics.sh --bootstrap-server {{ $.Release.Name }}-kafka:9092 --describe --topic "$topic"; do sleep 3; done
+              done
+        {{- if eq $component "processor" }}
+        - name: wait-for-postgres
+          image: {{ $.Values.database.image | quote }}
+          securityContext:
+            {{- include "payments.containerSecurity" $ | nindent 12 }}
+            readOnlyRootFilesystem: true
+          resources:
+            {{- include "payments.toolResources" $ | nindent 12 }}
+          # Explicit connection identity avoids OS-user lookup for UID 10001,
+          # which is intentionally absent from this tool image's /etc/passwd.
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef: {name: {{ $.Values.database.existingSecret | quote }}, key: username}
+            - name: PGDATABASE
+              valueFrom:
+                secretKeyRef: {name: {{ $.Values.database.existingSecret | quote }}, key: database}
+          command: [sh, -ec, 'until pg_isready -h {{ $.Release.Name }}-postgres -p 5432; do sleep 2; done']
+        {{- end }}
+      containers:
+        - name: transaction-{{ $component }}
+          image: {{ $settings.image | quote }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            {{- include "payments.containerSecurity" $ | nindent 12 }}
+            readOnlyRootFilesystem: true
+          resources:
+            {{- toYaml $settings.resources | nindent 12 }}
+          env:
+            - {name: KAFKA_BOOTSTRAP_SERVERS, value: "{{ $.Release.Name }}-kafka:9092"}
+            - {name: JAVA_TOOL_OPTIONS, value: "-XX:MaxRAMPercentage=60.0"}
+            {{- if eq $component "api" }}
+            - {name: MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED, value: "true"}
+            {{- else }}
+            - {name: KAFKA_CONSUMER_GROUP, value: "{{ $.Release.Name }}-processor"}
+            - {name: POSTGRES_HOST, value: "{{ $.Release.Name }}-postgres"}
+            {{- range $env, $key := dict "POSTGRES_DB" "database" "POSTGRES_USER" "username" "POSTGRES_PASSWORD" "password" }}
+            - name: {{ $env }}
+              valueFrom:
+                secretKeyRef: {name: {{ $.Values.database.existingSecret | quote }}, key: {{ $key }}}
+            {{- end }}
+            {{- end }}
+          {{- if eq $component "api" }}
+          ports: [{name: http, containerPort: 8080}]
+          startupProbe:
+            httpGet: {path: /actuator/health/liveness, port: http}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /actuator/health/readiness, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /actuator/health/liveness, port: http}
+            periodSeconds: 10
+            failureThreshold: 6
+          {{- else }}
+          # No fake probe: the published processor has no HTTP health endpoint.
+          # Running/Ready is process state only; verify processing through real events.
+          {{- end }}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 128Mi}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-transaction-api
+  labels:
+    {{- include "payments.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {app: {{ .Release.Name }}-transaction-api}
+  ports: [{name: http, port: 8080, targetPort: http}]

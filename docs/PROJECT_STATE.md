@@ -66,8 +66,44 @@ Updated: 2026-09-22
   Only an explicit manual dispatch for an approved full SHA can publish both verified
   image archives to GHCR. Only that job has packages:write. Hashes and registry digests
   provide traceability, not signing or atomic publication. See ADR 0008.
+- M3 adds `deploy/helm/payments`, a digest-pinned kind configuration and an isolated
+  Windows acceptance script. The chart reuses M2's immutable application images,
+  provisions both topics, mounts separate infrastructure PVCs and references an
+  externally supplied database Secret. Resource budgets, numeric non-root identities,
+  seccomp and dropped capabilities apply to all workloads. Application root
+  filesystems are read-only; API database isolation is preserved.
+  API/infra probes check their actual availability; the processor still lacks a
+  listener-health endpoint and requires manual restart after technical failure.
+  See ADR 0009 for this explicit limitation and the controlled configuration rollback.
 
 ## Validated State
+
+- 2026-09-22 (M3, local working tree based on 3a1a310):
+  `scripts/verify-kubernetes.ps1` passed on the isolated cluster
+  `payments-m3-283e8ef3` and removed it on exit. Toolchain: kind 0.33.0
+  (download SHA-256 checked), Kubernetes 1.34.11, kubectl 1.34.1, Helm 3.15.2,
+  Docker Desktop Linux containers with approximately 8 GB RAM.
+  Helm lint and server-side dry run passed; actual pods ran under enforced
+  Pod Security restricted/v1.34. Application digest references matched the M2
+  publication evidence; runtime UID was 10001, application roots were read-only,
+  privileges/capabilities/token mounting were disabled and resource budgets present.
+  The API received no database configuration.
+  HTTP acceptance, identical retry, unchanged ledger on conflict, negative amount
+  and non-EUR rejection passed. Helm revision 2 changed the pod-template marker;
+  revision 3 rolled back to revision 1. Payments succeeded after both operations.
+  Recreating PostgreSQL/Kafka pods retained three ledger rows and three audits;
+  manual processor restart allowed a fourth valid transaction. Three retained
+  rejection notifications had the expected transaction keys, correlation IDs and
+  schema version. Raw pod/Helm history evidence remains under ignored
+  `artifacts/payments-m3-283e8ef3/`; no kubeconfig or Secret is committed.
+  The user's existing `minikube` context was preserved. An initial attempt exposed
+  pg_isready's OS-user lookup for UID 10001; explicitly supplying PGUSER/PGDATABASE
+  from the Secret fixed initialization, and the full fresh-cluster rerun passed.
+  This proves local configuration rollback/PVC retention, not schema rollback,
+  automatic listener recovery, high availability or cloud readiness. No M3 CI run,
+  Git push or new image publication was performed.
+  `.\mvnw.cmd -B -ntp clean verify` also passed in 4:03: 94 tests (74 Surefire,
+  20 Failsafe including five PaymentFlowIT scenarios), zero failures/errors/skips.
 
 - 2026-09-22 (M2 completed): following explicit user authorization to publish both
   images, dispatched CI on the already-pushed `codex/build-mvp` revision
@@ -382,7 +418,9 @@ See [ADR 0001](adr/0001-transaction-intake-contract.md) and
 [ADR 0003](adr/0003-business-rejections.md), [ADR 0004](adr/0004-payload-conflicts.md),
 and [ADR 0005](adr/0005-durable-business-rejections.md), extended by
 [ADR 0006](adr/0006-rejection-notifications.md). Local application containers follow
-[ADR 0007](adr/0007-containerized-local-platform.md).
+[ADR 0007](adr/0007-containerized-local-platform.md), secure delivery follows
+[ADR 0008](adr/0008-secure-image-delivery.md), and local Kubernetes follows
+[ADR 0009](adr/0009-local-kubernetes.md).
 
 - `Idempotency-Key` must equal the client-supplied `transactionId`; Kafka uses that
   ID as its record key. This does not guarantee ordering across an account.
@@ -444,27 +482,27 @@ and [ADR 0005](adr/0005-durable-business-rejections.md), extended by
 
 ## Next Objective
 
-M3 in [the approved roadmap](ROADMAP.md): implement a reproducible local Kubernetes
-deployment with Helm, using the M2 application images pinned by their verified GHCR
-digests. Preserve the HTTP -> Kafka -> processor -> PostgreSQL flow and documented
-manual failure recovery. Provide meaningful probes, resource limits and restricted
-workload permissions; demonstrate a controlled upgrade and rollback.
+Start M4 in [the approved roadmap](ROADMAP.md) with one bounded task: expose and
+test processor Kafka-listener health, then document a reproducible PostgreSQL
+outage/manual-recovery incident using that signal. A stopped listener must no
+longer be confused with a healthy running JVM. Preserve the existing acknowledgement
+and manual recovery semantics; do not silently add automatic retries or an outbox.
 
-M2 is complete for cca00ee through publication run 35661616528 and independent
-registry verification. The outbox remains deferred. The publication authorization
-covered these two images at this SHA; it does not authorize new Git pushes, future
-publications or cloud provisioning. No M3 implementation was started in this task.
+M3 deployment acceptance passed locally; M2 remains verified for cca00ee. Subsequent
+M4 work will add the remaining metrics, traces, dashboards and incident exercises
+before M5. Existing M2 authorization does not authorize new Git pushes, future
+image publications or cloud provisioning.
 
 ## Acceptance Criteria for the Next Objective
 
-- Document and reproduce installation into a local Kubernetes cluster with Helm;
-  use pinned application/infrastructure images and injected development secrets.
-- Configure resource requests/limits, non-root containers and restricted permissions;
-  keep database access confined to the processor.
-- Probes reflect the actual health they check; do not equate a live processor JVM
-  with a healthy Kafka listener. Document any remaining health limitation.
-- Verify accepted/duplicate/rejected outcomes and persistence through the deployed
-  flow, then demonstrate a controlled Helm upgrade and rollback.
-- Record executed commands, results and cleanup instructions; no cloud deployment
-  or production-readiness claim is implied.
+- A processor health signal distinguishes startup, a running listener and a listener
+  stopped by technical failure, without exposing credentials or payment payloads.
+- Unit/integration tests demonstrate the signal transition during a PostgreSQL
+  outage while retaining the no-premature-ack guarantee.
+- Restore PostgreSQL and restart the processor manually; verify replay/persistence
+  and the health signal's recovery. Document the commands in a runbook.
+- Explain readiness versus liveness and configure probes without creating an
+  automatic restart loop that changes the documented recovery strategy.
+- Run the full Maven lifecycle and record local results separately from CI; do not
+  publish new images or claim the old M2 digests contain the new observability code.
 
