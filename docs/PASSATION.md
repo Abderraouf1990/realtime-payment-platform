@@ -451,3 +451,71 @@ image publications or cloud provisioning.
   automatic restart loop that changes the documented recovery strategy.
 - Run the full Maven lifecycle and record local results separately from CI; do not
   publish new images or claim the old M2 digests contain the new observability code.
+
+## M4 — logs structurés et métriques de tentatives — 2026-09-22
+
+État de départ propre à HEAD 10a6808 : le volet santé est bien commité ;
+les mentions « aucun commit » ci-dessus décrivent les validations avant commit.
+ADR 0011 étend l'exposition health-only du premier volet aux métriques en lecture
+seule. L'historique des tests metrics-404 reste valable pour son ancienne révision.
+Les critères du volet logs/métriques sont conservés ci-dessous.
+
+### Objectif de ce volet (conservé)
+
+Continue M4 in [the approved roadmap](ROADMAP.md): add structured processing logs
+and bounded-cardinality outcome metrics (accepted, duplicate, rejected, technical
+failure), keeping transaction/correlation IDs in logs rather than metric labels.
+Preserve manual recovery, acknowledgement ordering and deterministic business rules.
+
+M3 deployment acceptance passed locally; M2 remains verified for cca00ee. Subsequent
+M4 work will add the remaining metrics, traces, dashboards and incident exercises
+before M5. Existing M2 authorization does not authorize new Git pushes, future
+image publications or cloud provisioning.
+
+### Critères de ce volet (conservés)
+
+- Structured processing logs retain transactionId/correlationId where validated,
+  with explicit outcomes/reasons and no raw payload, account data or credentials.
+- Metrics use bounded labels only; document whether each counts attempts or unique
+  business transactions, especially for duplicate/replayed events.
+- Tests exercise accepted, duplicate, rejected and technical-failure paths and
+  prove observability does not change persistence, acknowledgement or recovery.
+- Run the full Maven lifecycle, keep current health/outage coverage and update the
+  runbook. Record local results separately from CI and image publication.
+- The previous health/outage objective and its acceptance criteria are preserved
+  in [PASSATION.md](PASSATION.md#m4--santé-du-listener-et-incident-postgresql--2026-09-22).
+
+### Réalisation et compromis
+
+- Instrumentation limitée à l'adaptateur Kafka : le service métier, les stores,
+  la confirmation de publication et l'error handler restent inchangés.
+- Logs JSON avec IDs validés et raisons bornées ; quatre séries Micrometer par
+  outcome, sans identifiant en label. Actuator expose health et metrics en lecture.
+- Compromis : des tentatives locales best effort, remises à zéro au redémarrage,
+  permettent le diagnostic sans ajouter de transaction ou modifier l'ack.
+  Elles ne remplacent pas l'audit PostgreSQL et ne comptent pas les erreurs
+  avant invocation du listener ni celles du commit d'offset. Voir ADR 0011.
+- Exercice reproductible : suivre les requêtes metrics et le filtre JSON du
+  [runbook PostgreSQL](runbooks/processor-postgresql-outage.md), comparer les
+  compteurs avant/après redémarrage avec les lignes ledger et offsets Kafka.
+
+### Vérifications locales
+
+- Un premier lancement ciblé a signalé une erreur de compilation du nouveau test :
+  SimpleMeterRegistry n'est pas AutoCloseable. Le nettoyage utilise désormais
+  try/finally ; les six nouveaux tests unitaires passent au lancement suivant.
+- `.\mvnw.cmd -B -ntp -pl payment-e2e-tests -am "-Dit.test=PaymentFlowIT" "-Dfailsafe.failIfNoSpecifiedTests=false" verify` :
+  BUILD SUCCESS en 2:28, les cinq E2E passent avec les vrais JARs, les logs JSON,
+  les compteurs HTTP et les garanties ledger/ack/replay. Journal local :
+  `%TEMP%\payments-m4-telemetry-e2e.log`.
+- `.\mvnw.cmd -B -ntp clean verify` : BUILD SUCCESS en 4:16, terminé à
+  22:17:23 +02:00 le 2026-09-22. Rapports XML : 107 tests, dont 87 Surefire et
+  20 Failsafe (cinq E2E), zéro échec, erreur ou ignoré. Journal local :
+  `%TEMP%\payments-m4-telemetry-verify.log`.
+- Les E2E démontrent les quatre outcomes, les champs JSON, les seuls labels
+  outcome du compteur, l'absence d'ack prématuré pendant la panne et le reset
+  des compteurs après redémarrage/replay. La panne de compteur est testée en unitaire.
+- Historique antérieur de ce fichier conservé intégralement ; les anciens critères
+  de PROJECT_STATE sont déplacés ci-dessus. Son prochain objectif est maintenant
+  la propagation du contexte de trace HTTP/Kafka. Aucun commit, push, run CI,
+  déploiement Kubernetes M4 ou publication d'image pour ce volet dans cette session.

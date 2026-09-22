@@ -549,7 +549,7 @@ survive pod recreation, but deleting kind deletes their data.
 
 ## Listener health and PostgreSQL incident (M4, first slice)
 
-Newly built processor JARs expose only Actuator health, by default at
+Newly built processor JARs expose Actuator health and read-only metrics, by default at
 `127.0.0.1:8081` (`PROCESSOR_ADDRESS` / `PROCESSOR_PORT`). The published M2
 image digests still contain the previous non-web processor. No new image has
 been published. See [ADR 0010](docs/adr/0010-processor-listener-health.md).
@@ -579,8 +579,27 @@ opt-in configuration is separate from the existing M3 acceptance evidence.
 .\mvnw.cmd clean verify
 ```
 
-This is the first M4 slice. Structured logs, business/progress metrics, distributed
-traces, alerting, dashboards and the remaining incident exercises are still pending.
+The processor now writes structured JSON processing logs with `event=payment.processing`,
+validated transaction/correlation IDs, outcome, reasonCodes, partition and offset.
+No account, amount, raw event or exception is attached to these processing records.
+`payments.processing.attempts` has only four `outcome` series: accepted, duplicate,
+rejected and technical_failure. IDs and reasons are never labels on this metric.
+
+```powershell
+curl.exe -s http://127.0.0.1:8081/actuator/metrics/payments.processing.attempts
+curl.exe -s 'http://127.0.0.1:8081/actuator/metrics/payments.processing.attempts?tag=outcome:technical_failure'
+```
+
+These are per-JVM attempts before Kafka acknowledgement, not unique transactions
+or durable audit totals. Replays can increment again; restart resets counters.
+Deserialization/poll failures before the listener and offset-commit failures are
+outside this metric. Recording failures must not change payment processing.
+See [ADR 0011](docs/adr/0011-processing-logs-and-attempt-metrics.md) and the runbook
+for the precise limits. Built-in framework metrics are also visible on this local
+management surface; no collector or external exposure is introduced.
+
+M4 remains in progress: distributed traces, progress/lag metrics, alerting,
+dashboards and the remaining incident exercises are still pending.
 
 ## Secure image delivery (M2)
 

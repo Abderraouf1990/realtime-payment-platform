@@ -12,9 +12,9 @@ L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
 | Statut | Situation vérifiée au 2026-09-22 |
 | --- | --- |
 | TERMINÉ | M0 à M2 selon les [preuves datées](PASSATION.md#validated-state) ; M3 validé localement et commité dans `6c84939`. Cela ne constitue pas une validation CI de M3. |
-| EN COURS | M4 : premier volet de santé du listener terminé et validé localement ; les autres travaux d'observabilité restent ouverts. |
-| À FAIRE | M4 : logs structurés, métriques, traces, alertes, dashboards et autres incidents ; M5 : assistant d'incident. Les critères de la prochaine tâche restent en fin de fichier. |
-| BLOQUÉ | Aucun blocage actuel démontré pour commencer M4. Une nouvelle publication, un push ou un déploiement cloud restent soumis à autorisation ; ce ne sont pas des prérequis au travail local. |
+| EN COURS | M4 : santé du listener commitée ; logs structurés et métriques de tentatives validés localement. Les autres travaux d'observabilité restent ouverts. |
+| À FAIRE | M4 : traces, métriques de progression/lag, collecte, alertes, dashboards et autres incidents ; M5 : assistant d'incident. Les critères de la prochaine tâche restent en fin de fichier. |
+| BLOQUÉ | Aucun blocage actuel démontré pour poursuivre M4. Une nouvelle publication, un push ou un déploiement cloud restent soumis à autorisation ; ce ne sont pas des prérequis au travail local. |
 | ABANDONNÉ | Aucun nouvel abandon observé. L'outbox et M6 restent différés, pas abandonnés. |
 
 ## Current Implementation
@@ -97,9 +97,27 @@ L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
   Readiness includes the listener; startup/liveness remain independent of dependency
   failures. Manual restart and database/Kafka acknowledgement ordering are unchanged.
   Seven unit tests and the real-JAR PostgreSQL outage E2E cover these distinctions.
+- Processor processing logs now use Boot Logstash JSON with validated IDs,
+  outcome/reasonCodes and Kafka partition/offset; no account, raw payload or exception
+  is attached to these processing records. This does not claim global log redaction.
+  `payments.processing.attempts` has four fixed `outcome` series (accepted, duplicate,
+  rejected, technical_failure), with no ID/reason labels. Read-only Actuator metrics
+  are exposed alongside health on the same loopback management surface.
+  These are best-effort per-JVM listener attempts before ack, reset on restart,
+  not unique payments or audit totals. Pre-listener deserialization/poll failures
+  and offset-commit failures are outside the counter. Recording failures cannot
+  turn processing success into failure or mask its original sanitized error.
 
 ## Validated State
 
+- M4, logs/métriques (2026-09-22, travail local basé sur `10a6808`) : les cinq
+  E2E ciblés passent, puis `.\mvnw.cmd -B -ntp clean verify` réussit en 4:16 :
+  107 tests (87 Surefire, 20 Failsafe dont cinq E2E), aucun échec, erreur ou ignoré.
+  Six nouveaux tests unitaires couvrent les outcomes, IDs/labels et une panne de
+  compteur ; les E2E lisent les vrais logs JSON et compteurs HTTP, avec les
+  assertions ledger/offset/santé conservées et le reset après redémarrage vérifié.
+  Aucun commit, push, run CI ou publication d'image pour ce volet dans cette session.
+  ADR 0011 et le runbook détaillent les limites ; preuves/commandes dans PASSATION.md.
 - M4, premier volet (2026-09-22, travail local basé sur `7b31f6d`) : sept nouveaux
   tests unitaires et l'E2E PostgreSQL ciblé passent. Le cycle complet
   `.\mvnw.cmd -B -ntp clean verify` passe en 4:05 : 101 tests (81 Surefire,
@@ -109,7 +127,8 @@ L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
   Helm lint passe avec/sans sondes processor et le rendu opt-in a été inspecté.
   Aucune validation Kubernetes M4 en exécution, CI M4 ou nouvelle publication
   n'est revendiquée. Voir le [runbook](runbooks/processor-postgresql-outage.md)
-  et les détails dans PASSATION.md. Aucun commit ni push effectué pour ce volet.
+  et les détails dans PASSATION.md. Ce volet a ensuite été commité dans `10a6808` ;
+  aucun push effectué par l'assistant.
 - M3 est commité dans `6c84939`. La validation locale du 2026-09-22 a passé :
   `.\mvnw.cmd -B -ntp clean verify` en 4:03, 94 tests (74 Surefire et 20 Failsafe,
   dont cinq E2E), aucun échec, erreur ou test ignoré.
@@ -121,7 +140,7 @@ L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
   [run 35661616528](https://github.com/Abderraouf1990/realtime-payment-platform/actions/runs/35661616528).
   Les digests et preuves de publication restent dans [le relevé M2](evidence/m2-publication.json).
 - Aucun push effectué par l'assistant dans cette session. État distant et éventuels
-  runs CI pour `6c84939` / `7b31f6d` : **À confirmer**. La réorganisation documentaire
+  runs CI pour `6c84939` / `7b31f6d` / `10a6808` : **À confirmer**. La réorganisation documentaire
   précédente n'avait pas relancé de tests ; le volet M4 ci-dessus les a exécutés.
 - Historique complet des validations, incidents résolus, commandes et décisions
   remplacées : [PASSATION.md](PASSATION.md). Les anciens statuts y sont conservés.
@@ -137,6 +156,7 @@ and [ADR 0005](adr/0005-durable-business-rejections.md), extended by
 [ADR 0008](adr/0008-secure-image-delivery.md), and local Kubernetes follows
 [ADR 0009](adr/0009-local-kubernetes.md).
 Source-built processor health follows [ADR 0010](adr/0010-processor-listener-health.md).
+Processing logs/counters follow [ADR 0011](adr/0011-processing-logs-and-attempt-metrics.md).
 
 - `Idempotency-Key` must equal the client-supplied `transactionId`; Kafka uses that
   ID as its record key. This does not guarantee ordering across an account.
@@ -190,7 +210,8 @@ Source-built processor health follows [ADR 0010](adr/0010-processor-listener-hea
   offset commits. The end-to-end test simulates server unavailability by stopping
   PostgreSQL, not a network partition; processor tests separately inject commit failure.
 - Add authentication, status lookup,
-  distributed traces, business metrics, and operational dashboards. The event field
+  distributed traces, progress/lag metrics, collection and operational dashboards. Outcome
+  counters now exist but are non-durable attempt telemetry. The event field
   supplies correlation metadata; it does not itself implement distributed tracing.
 - Spring Boot manages JUnit Jupiter 6.0.3, required by Spring Framework 7. AGENTS.md
   now reflects the actual version and includes the payment-e2e-tests module.
@@ -202,9 +223,9 @@ Source-built processor health follows [ADR 0010](adr/0010-processor-listener-hea
 
 ## Next Objective
 
-Continue M4 in [the approved roadmap](ROADMAP.md): add structured processing logs
-and bounded-cardinality outcome metrics (accepted, duplicate, rejected, technical
-failure), keeping transaction/correlation IDs in logs rather than metric labels.
+Continue M4 in [the approved roadmap](ROADMAP.md): propagate distributed trace
+context from HTTP intake through Kafka to processor execution, with tests proving
+the causal relationship and keeping business correlationId independent of trace IDs.
 Preserve manual recovery, acknowledgement ordering and deterministic business rules.
 
 M3 deployment acceptance passed locally; M2 remains verified for cca00ee. Subsequent
@@ -214,13 +235,12 @@ image publications or cloud provisioning.
 
 ## Acceptance Criteria for the Next Objective
 
-- Structured processing logs retain transactionId/correlationId where validated,
-  with explicit outcomes/reasons and no raw payload, account data or credentials.
-- Metrics use bounded labels only; document whether each counts attempts or unique
-  business transactions, especially for duplicate/replayed events.
-- Tests exercise accepted, duplicate, rejected and technical-failure paths and
-  prove observability does not change persistence, acknowledgement or recovery.
-- Run the full Maven lifecycle, keep current health/outage coverage and update the
-  runbook. Record local results separately from CI and image publication.
-- The previous health/outage objective and its acceptance criteria are preserved
-  in [PASSATION.md](PASSATION.md#m4--santé-du-listener-et-incident-postgresql--2026-09-22).
+- HTTP producer and Kafka consumer spans retain a testable causal relationship;
+  an event without trace context is still processed correctly.
+- Keep correlationId and transactionId semantics unchanged; do not put payloads,
+  account data, credentials or unbounded IDs in metric labels.
+- Document retry/replay trace semantics and test context isolation between events;
+  tracing/export failures must not acknowledge failed processing or change recovery.
+- Run the full Maven lifecycle, retain health/log/counter/outage coverage, and
+  document a reproducible local trace exercise without publishing new images.
+- Earlier objectives and their criteria are preserved in [PASSATION.md](PASSATION.md).

@@ -83,6 +83,38 @@ the count query (one row) and the consumer-group query (offset advanced). Do not
 reset offsets or delete records to make the health check green. Stop both JARs
 with Ctrl+C when finished; `docker compose down` retains development data volumes.
 
+## Processing evidence and counter interpretation
+
+New source builds also expose read-only Actuator metrics and JSON processing logs
+(ADR 0011). Before/after the automated or manual incident, query:
+
+```powershell
+curl.exe -s http://127.0.0.1:8081/actuator/metrics/payments.processing.attempts
+curl.exe -s 'http://127.0.0.1:8081/actuator/metrics/payments.processing.attempts?tag=outcome:technical_failure'
+curl.exe -s 'http://127.0.0.1:8081/actuator/metrics/payments.processing.attempts?tag=outcome:accepted'
+```
+
+For the automated scenario, before restart: accepted=1, technical_failure=1,
+duplicate=0, rejected=0. The original JVM remains alive so these can be inspected
+even while listener readiness is 503. After manual JVM restart and replay:
+accepted=1 and all other outcomes=0 in the new process; the ledger contains two
+rows. This difference demonstrates why counters cannot replace durable accounting.
+
+Filter the processor log by `event=payment.processing`, then transactionId or
+correlationId. Each record includes outcome, reasonCodes, partition and offset.
+For example, inspect the automated outage log from the repository root:
+
+```powershell
+$logPath = 'payment-e2e-tests/target/failsafe-reports/databaseOutageLeavesOffsetUncommittedUntilManualRestartAndReplayIT/processor.log'
+Get-Content $logPath | Where-Object { $_.StartsWith('{') } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.event -eq 'payment.processing' } | Select-Object transactionId, correlationId, outcome, reasonCodes, partition, offset
+```
+
+Do not expect a technical_failure increment for malformed JSON rejected before
+listener invocation, polling failures or failed offset commits. Check listener
+health and broker offsets too. Metrics count attempts before acknowledgement;
+they reset on restart, may be missing after a crash/telemetry failure, and are not
+unique-transaction counts. Repeated business rejections increment rejected again.
+
 ## Kubernetes probe configuration
 
 The chart's default processor digest remains M2, so its processor probes remain

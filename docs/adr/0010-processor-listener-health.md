@@ -3,6 +3,10 @@
 Date: 2026-09-22
 Status: Accepted. Extends ADR 0009 for newly built processor images.
 
+2026-09-22 update: [ADR 0011](0011-processing-logs-and-attempt-metrics.md) additionally
+exposes read-only Actuator metrics in new builds. The health-only exposure and
+metrics-404 test described below refer to this initial health slice.
+
 ## Decision
 
 Add Spring MVC solely to expose Actuator health from the processor. The default

@@ -14,20 +14,20 @@ Build practical expertise in AI engineering and demonstrate senior DevSecOps cap
 | M1 | Containerize API and processor | Completed locally and in CI | Image construction and Compose acceptance passed on GitHub for cca00ee: non-root, accepted payment, duplicate, durable rejection, Kafka event and down/up retention. See PROJECT_STATE.md. |
 | M2 | Secure image delivery | Completed for cca00ee | Authorized manual run 35661616528 passed all gates and published both images. Registry manifests/configs independently match the tested bundle, source SHA and non-root configuration. See PROJECT_STATE.md and docs/evidence/m2-publication.json. |
 | M3 | Local Kubernetes deployment | Completed locally | Isolated kind/Helm acceptance passed: M2 image digests, restricted non-root workloads, injected Secret, API/infra probes, payment outcomes, upgrade/rollback and PVC retention. Processor listener-health limitation is explicit in ADR 0009; no M3 CI claim. |
-| M4 | Observability and incident exercises | In progress | First slice: listener-health signal and PostgreSQL outage/manual-recovery E2E implemented; see PROJECT_STATE.md for validation. Structured logs, metrics, traces, dashboards, alerting and other incident exercises remain open. |
+| M4 | Observability and incident exercises | In progress | Listener health, structured processing logs and bounded attempt counters implemented; see PROJECT_STATE.md for validation. Traces, progress/lag metrics, collection, dashboards, alerting and other incidents remain open. |
 | M5 | Secure, evaluated incident assistant | Planned | RAG over versioned runbooks/ADRs; read-only incident evidence; sourced structured diagnosis and abstention; 15–20 evaluation cases including prompt injection; measure quality, latency and cost; authenticated access and redaction. |
 | M6 | Optional cloud demonstration | Deferred | Choose provider and budget explicitly; reproducible deployment and teardown; no cloud provisioning implied by this roadmap. |
 
 M1–M4 prepare the environment and evidence for M5. Keep these milestones bounded: AI must not be postponed indefinitely by additional payment features. Each milestone needs a reproducible demonstration, not a claim of production readiness.
 
-## Current task: M4, structured processing logs and outcome metrics
+## Current task: M4, distributed trace context across HTTP and Kafka
 
-Continue M4 with structured processing logs and bounded-cardinality outcome
-metrics. Keep transaction/correlation IDs in logs, not metric labels; define
-attempt-versus-unique-transaction semantics for replay. Preserve acknowledgement
-and manual recovery. Listener health and its PostgreSQL incident runbook are the
-first implemented slice; traces, dashboards, alerting and other incident exercises
-remain in the milestone. Keep new payment features and cloud deployment out of scope.
+Continue M4 with trace-context propagation from HTTP intake through Kafka to the
+processor. Test causal relationships and isolation between attempts, retaining
+business correlationId independently of tracing. Preserve acknowledgement and
+manual recovery. Health, logs and attempt counters are implemented; progress/lag
+metrics, collection, dashboards, alerting and other incidents remain in M4.
+Keep new payment features and cloud deployment out of scope.
 M2 publication was authorized only for cca00ee; further Git pushes and image
 publications still require the user's approval.
 
@@ -76,3 +76,8 @@ publications still require the user's approval.
   probes are opt-in for a new image. M4 remains in progress; proceed to structured
   logs and outcome metrics after the health slice's checks. No new publication,
   push or cloud deployment is authorized by this implementation.
+- 2026-09-22: Added structured processor logs and bounded outcome counters for
+  listener attempts, with explicit replay/reset and pre-ack semantics. Health is
+  committed as 10a6808. M4 remains in progress; the next slice is distributed trace
+  context, preserving correlation IDs and payment semantics. No new publication,
+  push or cloud deployment is implied.

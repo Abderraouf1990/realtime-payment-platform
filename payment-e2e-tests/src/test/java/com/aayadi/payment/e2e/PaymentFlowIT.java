@@ -9,6 +9,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.TestInfo;
 import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -88,9 +89,11 @@ class PaymentFlowIT {
         insertValidTransaction();
         assertThat(total(postgres)).isEqualTo(1);
         assertThat(rejectionCount("TX-E2E")).isZero();
-        for (var endpoint : List.of("env", "configprops", "beans", "metrics")) {
+        for (var endpoint : List.of("env", "configprops", "beans")) {
             assertThat(healthRequest(processor, "/actuator/" + endpoint).statusCode()).isEqualTo(404);
         }
+        assertAttempts(processor, 1, 0, 0, 0);
+        assertProcessingLog(processor, "TX-E2E", "CORR-E2E", "accepted", List.of());
     }
 
     @Test
@@ -103,6 +106,8 @@ class PaymentFlowIT {
         assertThat(row(postgres, "TX-E2E")).isEqualTo(original);
         processor.awaitLog("transactionId=TX-E2E outcome=DUPLICATE");
         assertThat(rejectionCount("TX-E2E")).isZero();
+        assertAttempts(processor, 1, 1, 0, 0);
+        assertProcessingLog(processor, "TX-E2E", "CORR-E2E", "duplicate", List.of());
     }
 
     @Test
@@ -114,6 +119,8 @@ class PaymentFlowIT {
         assertThat(total(postgres)).isEqualTo(1);
         processor.awaitLog("transactionId=TX-E2E correlationId=CORR-CONFLICT reason=PAYLOAD_CONFLICT");
         assertThat(rejectionCount("TX-E2E")).isEqualTo(1);
+        assertAttempts(processor, 1, 0, 1, 0);
+        assertProcessingLog(processor, "TX-E2E", "CORR-CONFLICT", "rejected", List.of("PAYLOAD_CONFLICT"));
     }
 
     @Test
@@ -129,6 +136,9 @@ class PaymentFlowIT {
         processor.awaitLog("transactionId=TX-USD reasons=[CURRENCY_NOT_EUR]");
         assertThat(rejectionCount("TX-NEGATIVE")).isEqualTo(1);
         assertThat(rejectionCount("TX-USD")).isEqualTo(1);
+        assertAttempts(processor, 0, 0, 2, 0);
+        assertProcessingLog(processor, "TX-NEGATIVE", "CORR-NEGATIVE", "rejected", List.of("AMOUNT_NOT_POSITIVE"));
+        assertProcessingLog(processor, "TX-USD", "CORR-USD", "rejected", List.of("CURRENCY_NOT_EUR"));
     }
 
     @Test
@@ -141,6 +151,9 @@ class PaymentFlowIT {
         processor.awaitLog("Consumer stopped");
         awaitHealth(processor, 503, "STOPPED");
         assertThat(committed(admin)).isEqualTo(1);
+
+        assertAttempts(processor, 1, 0, 0, 1);
+        assertProcessingLog(processor, "TX-OUTAGE", "CORR-OUTAGE", "technical_failure", List.of("PROCESSING_FAILURE"));
 
         postgres.getDockerClient().startContainerCmd(postgres.getContainerId()).exec();
         await().atMost(Duration.ofSeconds(30)).ignoreExceptions().untilAsserted(() ->
@@ -156,6 +169,52 @@ class PaymentFlowIT {
         assertThat(count(postgres, "TX-OUTAGE")).isEqualTo(1);
         assertThat(row(postgres, "TX-E2E")).isEqualTo(original);
         assertThat(total(postgres)).isEqualTo(2);
+        // Counters belong to this JVM, not to the durable ledger or previous process.
+        assertAttempts(restarted, 1, 0, 0, 0);
+        assertProcessingLog(restarted, "TX-OUTAGE", "CORR-OUTAGE", "accepted", List.of());
+    }
+
+    private void assertAttempts(RunningApp app, int accepted, int duplicate, int rejected, int failed) throws Exception {
+        var expected = Map.of("accepted", accepted, "duplicate", duplicate, "rejected", rejected, "technical_failure", failed);
+        var mapper = JsonMapper.builder().build();
+        var base = healthRequest(app, "/actuator/metrics/payments.processing.attempts");
+        assertThat(base.statusCode()).as(base.body()).isEqualTo(200);
+        var tags = mapper.readTree(base.body()).get("availableTags");
+        assertThat(tags.size()).isEqualTo(1);
+        assertThat(tags.get(0).get("tag").asString()).isEqualTo("outcome");
+        var values = new ArrayList<String>();
+        for (var value : tags.get(0).get("values")) values.add(value.asString());
+        assertThat(values).containsExactlyInAnyOrderElementsOf(expected.keySet());
+        for (var entry : expected.entrySet()) {
+            var response = healthRequest(app, "/actuator/metrics/payments.processing.attempts?tag=outcome:" + entry.getKey());
+            assertThat(response.statusCode()).isEqualTo(200);
+            assertThat(mapper.readTree(response.body()).get("measurements").get(0).get("value").asDouble())
+                    .as(entry.getKey()).isEqualTo(entry.getValue().doubleValue());
+        }
+    }
+
+    private void assertProcessingLog(RunningApp app, String id, String correlation, String outcome, List<String> reasons) {
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+            var mapper = JsonMapper.builder().build();
+            var matches = new ArrayList<tools.jackson.databind.JsonNode>();
+            for (var line : Files.readAllLines(app.log())) {
+                if (!line.startsWith("{")) continue; // JVM diagnostics need not be JSON.
+                var json = mapper.readTree(line);
+                if (json.has("event") && json.get("event").asString().equals("payment.processing")
+                        && json.get("transactionId").asString().equals(id) && json.get("outcome").asString().equals(outcome)) {
+                    assertThat(line).doesNotContain("ACC-E2E", "accountId", "jdbc:", "password", "stack_trace");
+                    matches.add(json);
+                }
+            }
+            assertThat(matches).hasSize(1);
+            var json = matches.getFirst();
+            assertThat(json.get("correlationId").asString()).isEqualTo(correlation);
+            var actualReasons = new ArrayList<String>();
+            for (var reason : json.get("reasonCodes")) actualReasons.add(reason.asString());
+            assertThat(actualReasons).isEqualTo(reasons);
+            assertThat(json.get("partition").asInt()).isZero();
+            assertThat(json.get("offset").asLong()).isGreaterThanOrEqualTo(0);
+        });
     }
 
     private void awaitHealth(RunningApp app, int expectedCode, String state) throws Exception {
