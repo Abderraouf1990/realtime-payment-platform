@@ -5,6 +5,9 @@ api:
     requests: {cpu: 100m, memory: 256Mi}
     limits: {cpu: "1", memory: 768Mi}
 processor:
+  # Enable only with an M4 image built from source; the published M2 digest has no HTTP health.
+  healthProbes:
+    enabled: false
   image: ghcr.io/abderraouf1990/realtime-payment-platform-transaction-processor@sha256:7999d5611fd1452ceeef66dd64c8fb381b281a2cf854596993d4b92404e3d8db
   resources:
     requests: {cpu: 100m, memory: 384Mi}

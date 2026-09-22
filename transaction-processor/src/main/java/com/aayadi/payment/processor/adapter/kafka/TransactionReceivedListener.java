@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class TransactionReceivedListener {
+    public static final String LISTENER_ID = "transaction-received";
     private static final Logger LOG = LoggerFactory.getLogger(TransactionReceivedListener.class);
     private final ProcessTransaction processor;
 
@@ -19,7 +20,7 @@ public class TransactionReceivedListener {
         this.processor = processor;
     }
 
-    @KafkaListener(id = "transaction-received", idIsGroup = false, topics = "${payments.kafka.received-topic}")
+    @KafkaListener(id = LISTENER_ID, idIsGroup = false, topics = "${payments.kafka.received-topic}")
     public void receive(ConsumerRecord<String, TransactionReceived> record) {
         var event = record.value();
         String correlationId = safeId(event == null ? null : event.correlationId());

@@ -60,6 +60,7 @@ class PaymentFlowIT {
         port = api.httpPort();
         processor.awaitLog("Started TransactionProcessorApplication");
         http = manage(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build());
+        awaitHealth(processor, 200, "RUNNING");
     }
 
     @AfterEach
@@ -87,6 +88,9 @@ class PaymentFlowIT {
         insertValidTransaction();
         assertThat(total(postgres)).isEqualTo(1);
         assertThat(rejectionCount("TX-E2E")).isZero();
+        for (var endpoint : List.of("env", "configprops", "beans", "metrics")) {
+            assertThat(healthRequest(processor, "/actuator/" + endpoint).statusCode()).isEqualTo(404);
+        }
     }
 
     @Test
@@ -135,6 +139,7 @@ class PaymentFlowIT {
         post(http, port, "TX-OUTAGE", body("TX-OUTAGE", "CORR-OUTAGE", "5.00", "EUR"));
         processor.awaitLog("Ledger processing failed correlationId=CORR-OUTAGE");
         processor.awaitLog("Consumer stopped");
+        awaitHealth(processor, 503, "STOPPED");
         assertThat(committed(admin)).isEqualTo(1);
 
         postgres.getDockerClient().startContainerCmd(postgres.getContainerId()).exec();
@@ -142,13 +147,40 @@ class PaymentFlowIT {
                 assertThat(count(postgres, "TX-OUTAGE")).isZero());
         // Database recovery alone cannot restart the stopped listener.
         assertThat(committed(admin)).isEqualTo(1);
+        awaitHealth(processor, 503, "STOPPED");
         processor.close();
         var restarted = manage(launchProcessor(scenario + "/processor-restarted.log", kafka, postgres));
         restarted.awaitLog("Started TransactionProcessorApplication");
+        awaitHealth(restarted, 200, "RUNNING");
         awaitOffset(admin, 2);
         assertThat(count(postgres, "TX-OUTAGE")).isEqualTo(1);
         assertThat(row(postgres, "TX-E2E")).isEqualTo(original);
         assertThat(total(postgres)).isEqualTo(2);
+    }
+
+    private void awaitHealth(RunningApp app, int expectedCode, String state) throws Exception {
+        int healthPort = app.httpPort();
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
+            assertThat(app.process().isAlive()).isTrue();
+            var listener = healthRequest(healthPort, "/actuator/health/listener");
+            assertThat(listener.statusCode()).as(listener.body()).isEqualTo(expectedCode);
+            assertThat(listener.body()).contains("\"state\":\"" + state + "\"")
+                    .doesNotContain("TX-", "CORR-", "ACC-", "jdbc:", "password", "exception");
+            assertThat(healthRequest(healthPort, "/actuator/health/readiness").statusCode()).isEqualTo(expectedCode);
+            // A stopped consumer must not trigger an automatic JVM restart via liveness.
+            var liveness = healthRequest(healthPort, "/actuator/health/liveness");
+            assertThat(liveness.statusCode()).isEqualTo(200);
+            assertThat(liveness.body()).isEqualTo("{\"status\":\"UP\"}");
+        });
+    }
+
+    private HttpResponse<String> healthRequest(RunningApp app, String path) throws Exception {
+        return healthRequest(app.httpPort(), path);
+    }
+
+    private HttpResponse<String> healthRequest(int healthPort, String path) throws Exception {
+        return http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + healthPort + path))
+                .timeout(Duration.ofSeconds(5)).GET().build(), HttpResponse.BodyHandlers.ofString());
     }
 
     private String insertValidTransaction() throws Exception {
@@ -160,6 +192,7 @@ class PaymentFlowIT {
 
     private static RunningApp launchProcessor(String log, KafkaContainer kafka, PostgreSQLContainer postgres) throws Exception {
         return launch("transaction-processor", log, kafka, List.of(
+                "--server.port=0",
                 "--spring.datasource.url=" + jdbcUrl(postgres),
                 "--spring.datasource.username=" + postgres.getUsername(),
                 "--spring.datasource.password=" + postgres.getPassword(),
@@ -253,13 +286,12 @@ class PaymentFlowIT {
     private record RunningApp(Process process, Path log) implements AutoCloseable {
         void awaitLog(String text) {
             await().atMost(Duration.ofSeconds(60)).untilAsserted(() -> {
-                // A non-web processor can exit after its last consumer stops on a technical failure.
                 assertThat(Files.readString(log)).contains(text);
             });
         }
 
         int httpPort() throws Exception {
-            awaitLog("Started TransactionApiApplication");
+            awaitLog("Tomcat started on port");
             var match = Pattern.compile("Tomcat started on port (\\d+)").matcher(Files.readString(log));
             assertThat(match.find()).as("HTTP port in %s", log).isTrue();
             return Integer.parseInt(match.group(1));

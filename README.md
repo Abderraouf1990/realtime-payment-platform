@@ -48,8 +48,10 @@ Compose now starts the API, processor, Kafka 4.1.1 in single-node KRaft mode,
 PostgreSQL 17.6 and a one-shot topic initializer. The applications wait for successful
 topic initialization, and the processor also waits for a healthy database. Check
 `docker compose ps -a`: kafka-init must exit with code 0. API health is checked via
-Actuator; the processor has no HTTP server and its running state does **not** prove
-listener health. The acceptance exercise below verifies actual consumption.
+Actuator. Source-built processors now expose listener health on container loopback
+8081, without a published Compose port or Compose healthcheck; published M2 images
+still have no HTTP server. A running process alone does **not** prove listener health.
+The acceptance exercise below verifies actual consumption.
 Stop following logs with Ctrl+C; this does not stop Kafka.
 Ports bind to loopback: API at `localhost:8080` (`API_PORT`), Kafka at `localhost:9092`
 and PostgreSQL at `localhost:5432`. The database and user default to `payments`; the password
@@ -208,8 +210,9 @@ skipping, or acknowledging the failed record. There are no retry topics or DLQ.
 Correct the underlying problem and restart the processor to replay from the last
 committed offset. The process itself may remain running with its listener stopped;
 a malformed event requires operator intervention and will
-block consumption again on restart. Automated recovery and listener-health
-monitoring are not implemented. A new group starts at the earliest retained event.
+block consumption again on restart. Automated recovery is not implemented.
+Source-built processors expose listener health as described in the M4 section below;
+alerting is still pending. A new group starts at the earliest retained event.
 See [ADR 0002](docs/adr/0002-ledger-consumption.md).
 
 Payload conflicts are logged as `transactionId=... correlationId=... reason=PAYLOAD_CONFLICT`
@@ -543,6 +546,41 @@ image filesystem. The chart uses an existing Secret (`database`, `username`,
 `password` keys); only the processor receives database credentials. This single-node
 exercise provides neither high availability nor network isolation or TLS. PVCs
 survive pod recreation, but deleting kind deletes their data.
+
+## Listener health and PostgreSQL incident (M4, first slice)
+
+Newly built processor JARs expose only Actuator health, by default at
+`127.0.0.1:8081` (`PROCESSOR_ADDRESS` / `PROCESSOR_PORT`). The published M2
+image digests still contain the previous non-web processor. No new image has
+been published. See [ADR 0010](docs/adr/0010-processor-listener-health.md).
+
+```powershell
+curl.exe -i http://127.0.0.1:8081/actuator/health/listener
+curl.exe -i http://127.0.0.1:8081/actuator/health/readiness
+curl.exe -i http://127.0.0.1:8081/actuator/health/liveness
+```
+
+Listener health exposes only STARTING, RUNNING, STOPPED, MISSING or PAUSED.
+After a processing failure, listener/readiness return 503 while liveness remains
+200, allowing inspection without automatic replay. Restore the dependency, then
+restart the processor manually. UP means the listener lifecycle is running;
+it does not prove database availability, broker connectivity, assigned partitions
+or processing progress. Idle database outages are detected on processing failure.
+
+The [PostgreSQL incident runbook](docs/runbooks/processor-postgresql-outage.md)
+contains the automated real-JAR exercise, a manual local exercise and the probe
+policy. Helm has opt-in `processor.healthProbes.enabled=true` for a new M4 image;
+it remains false for default M2 images. Startup/liveness use only the liveness
+group; readiness includes the listener. Runtime Kubernetes validation of this
+opt-in configuration is separate from the existing M3 acceptance evidence.
+
+```powershell
+.\mvnw.cmd -B -ntp -pl payment-e2e-tests -am '-Dit.test=PaymentFlowIT#databaseOutageLeavesOffsetUncommittedUntilManualRestartAndReplayIT' '-Dfailsafe.failIfNoSpecifiedTests=false' verify
+.\mvnw.cmd clean verify
+```
+
+This is the first M4 slice. Structured logs, business/progress metrics, distributed
+traces, alerting, dashboards and the remaining incident exercises are still pending.
 
 ## Secure image delivery (M2)
 

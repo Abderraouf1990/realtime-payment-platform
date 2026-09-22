@@ -12,8 +12,8 @@ L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
 | Statut | Situation vérifiée au 2026-09-22 |
 | --- | --- |
 | TERMINÉ | M0 à M2 selon les [preuves datées](PASSATION.md#validated-state) ; M3 validé localement et commité dans `6c84939`. Cela ne constitue pas une validation CI de M3. |
-| EN COURS | Aucun développement applicatif en cours observé dans le dépôt ; M4 n'est pas encore implémenté. |
-| À FAIRE | M4 : santé du listener Kafka et exercice PostgreSQL avec reprise manuelle, puis les autres travaux d'observabilité ; M5 : assistant d'incident. Les critères détaillés restent en fin de fichier. |
+| EN COURS | M4 : premier volet de santé du listener terminé et validé localement ; les autres travaux d'observabilité restent ouverts. |
+| À FAIRE | M4 : logs structurés, métriques, traces, alertes, dashboards et autres incidents ; M5 : assistant d'incident. Les critères de la prochaine tâche restent en fin de fichier. |
 | BLOQUÉ | Aucun blocage actuel démontré pour commencer M4. Une nouvelle publication, un push ou un déploiement cloud restent soumis à autorisation ; ce ne sont pas des prérequis au travail local. |
 | ABANDONNÉ | Aucun nouvel abandon observé. L'outbox et M6 restent différés, pas abandonnés. |
 
@@ -69,8 +69,9 @@ L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
   API HTTP binds to loopback 8080 (API_PORT); internal connections use kafka:29092 and
   postgres:5432. Only the processor receives database settings. Topic initialization
   gates both applications and PostgreSQL health gates the processor.
-  API Actuator health is checked; the non-web processor has no HTTP healthcheck.
-  A running processor container is not a guarantee of listener health.
+  API Actuator health is checked. New processor builds expose HTTP health on
+  container loopback, without a Compose port/healthcheck; published M2 images remain
+  non-web. A running processor container alone is not a guarantee of listener health.
 - GitHub Actions CI runs `./mvnw clean verify` on pushes and pull requests targeting
   `main` and `codex/build-mvp`, using Temurin 25, Maven caching, and read-only contents
   permissions. Surefire/Failsafe reports are uploaded only on failure.
@@ -87,12 +88,28 @@ L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
   externally supplied database Secret. Resource budgets, numeric non-root identities,
   seccomp and dropped capabilities apply to all workloads. Application root
   filesystems are read-only; API database isolation is preserved.
-  API/infra probes check their actual availability; the processor still lacks a
-  listener-health endpoint and requires manual restart after technical failure.
-  See ADR 0009 for this explicit limitation and the controlled configuration rollback.
+  API/infra probes check their actual availability. The default published M2 processor
+  still lacks HTTP health; optional processor probes require a new M4 image.
+  See ADR 0009 for the M3 configuration rollback scope and ADR 0010 for M4 health.
+- M4 source builds add Actuator listener health on loopback 8081 by default
+  (PROCESSOR_ADDRESS/PROCESSOR_PORT). STARTING, RUNNING, STOPPED, MISSING and PAUSED
+  reflect local container lifecycle only; details contain no payload or exception.
+  Readiness includes the listener; startup/liveness remain independent of dependency
+  failures. Manual restart and database/Kafka acknowledgement ordering are unchanged.
+  Seven unit tests and the real-JAR PostgreSQL outage E2E cover these distinctions.
 
 ## Validated State
 
+- M4, premier volet (2026-09-22, travail local basé sur `7b31f6d`) : sept nouveaux
+  tests unitaires et l'E2E PostgreSQL ciblé passent. Le cycle complet
+  `.\mvnw.cmd -B -ntp clean verify` passe en 4:05 : 101 tests (81 Surefire,
+  20 Failsafe dont cinq E2E), aucun échec, erreur ou test ignoré.
+  La panne laisse listener/readiness à 503, liveness à 200 et l'offset inchangé ;
+  après restauration PostgreSQL puis redémarrage manuel, santé et replay réussissent.
+  Helm lint passe avec/sans sondes processor et le rendu opt-in a été inspecté.
+  Aucune validation Kubernetes M4 en exécution, CI M4 ou nouvelle publication
+  n'est revendiquée. Voir le [runbook](runbooks/processor-postgresql-outage.md)
+  et les détails dans PASSATION.md. Aucun commit ni push effectué pour ce volet.
 - M3 est commité dans `6c84939`. La validation locale du 2026-09-22 a passé :
   `.\mvnw.cmd -B -ntp clean verify` en 4:03, 94 tests (74 Surefire et 20 Failsafe,
   dont cinq E2E), aucun échec, erreur ou test ignoré.
@@ -103,8 +120,9 @@ L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
 - M2 reste validé et publié pour `cca00ee` par le
   [run 35661616528](https://github.com/Abderraouf1990/realtime-payment-platform/actions/runs/35661616528).
   Les digests et preuves de publication restent dans [le relevé M2](evidence/m2-publication.json).
-- Aucun push effectué par l'assistant dans cette session. État distant et éventuel
-  run CI pour `6c84939` : **À confirmer**. Aucun test relancé pour cette réorganisation.
+- Aucun push effectué par l'assistant dans cette session. État distant et éventuels
+  runs CI pour `6c84939` / `7b31f6d` : **À confirmer**. La réorganisation documentaire
+  précédente n'avait pas relancé de tests ; le volet M4 ci-dessus les a exécutés.
 - Historique complet des validations, incidents résolus, commandes et décisions
   remplacées : [PASSATION.md](PASSATION.md). Les anciens statuts y sont conservés.
 
@@ -118,6 +136,7 @@ and [ADR 0005](adr/0005-durable-business-rejections.md), extended by
 [ADR 0007](adr/0007-containerized-local-platform.md), secure delivery follows
 [ADR 0008](adr/0008-secure-image-delivery.md), and local Kubernetes follows
 [ADR 0009](adr/0009-local-kubernetes.md).
+Source-built processor health follows [ADR 0010](adr/0010-processor-listener-health.md).
 
 - `Idempotency-Key` must equal the client-supplied `transactionId`; Kafka uses that
   ID as its record key. This does not guarantee ordering across an account.
@@ -161,8 +180,12 @@ and [ADR 0005](adr/0005-durable-business-rejections.md), extended by
   Recovery depends on replay of retained input; publication can be repeated and the
   minimal notification contract does not identify each distinct rejected payload.
 - Define audit retention/access controls and operational recovery for malformed
-  events; currently technical/contract failures stop consumption. Add listener
-  health monitoring: the application process can remain alive after the listener stops.
+  events; currently technical/contract failures stop consumption. Listener health
+  is available in new builds, but alerting and progress/lag monitoring remain absent.
+  RUNNING does not prove broker/database reachability, assigned partitions or progress.
+  Idle PostgreSQL outages are detected only after a failed processing attempt.
+- M4 Helm probes are opt-in, disabled for the default M2 images; runtime deployment
+  with a new M4 image remains to be validated. No M4 image publication or CI is claimed.
 - Add concurrent duplicate tests and process-crash testing between database and
   offset commits. The end-to-end test simulates server unavailability by stopping
   PostgreSQL, not a network partition; processor tests separately inject commit failure.
@@ -179,11 +202,10 @@ and [ADR 0005](adr/0005-durable-business-rejections.md), extended by
 
 ## Next Objective
 
-Start M4 in [the approved roadmap](ROADMAP.md) with one bounded task: expose and
-test processor Kafka-listener health, then document a reproducible PostgreSQL
-outage/manual-recovery incident using that signal. A stopped listener must no
-longer be confused with a healthy running JVM. Preserve the existing acknowledgement
-and manual recovery semantics; do not silently add automatic retries or an outbox.
+Continue M4 in [the approved roadmap](ROADMAP.md): add structured processing logs
+and bounded-cardinality outcome metrics (accepted, duplicate, rejected, technical
+failure), keeping transaction/correlation IDs in logs rather than metric labels.
+Preserve manual recovery, acknowledgement ordering and deterministic business rules.
 
 M3 deployment acceptance passed locally; M2 remains verified for cca00ee. Subsequent
 M4 work will add the remaining metrics, traces, dashboards and incident exercises
@@ -192,13 +214,13 @@ image publications or cloud provisioning.
 
 ## Acceptance Criteria for the Next Objective
 
-- A processor health signal distinguishes startup, a running listener and a listener
-  stopped by technical failure, without exposing credentials or payment payloads.
-- Unit/integration tests demonstrate the signal transition during a PostgreSQL
-  outage while retaining the no-premature-ack guarantee.
-- Restore PostgreSQL and restart the processor manually; verify replay/persistence
-  and the health signal's recovery. Document the commands in a runbook.
-- Explain readiness versus liveness and configure probes without creating an
-  automatic restart loop that changes the documented recovery strategy.
-- Run the full Maven lifecycle and record local results separately from CI; do not
-  publish new images or claim the old M2 digests contain the new observability code.
+- Structured processing logs retain transactionId/correlationId where validated,
+  with explicit outcomes/reasons and no raw payload, account data or credentials.
+- Metrics use bounded labels only; document whether each counts attempts or unique
+  business transactions, especially for duplicate/replayed events.
+- Tests exercise accepted, duplicate, rejected and technical-failure paths and
+  prove observability does not change persistence, acknowledgement or recovery.
+- Run the full Maven lifecycle, keep current health/outage coverage and update the
+  runbook. Record local results separately from CI and image publication.
+- The previous health/outage objective and its acceptance criteria are preserved
+  in [PASSATION.md](PASSATION.md#m4--santé-du-listener-et-incident-postgresql--2026-09-22).

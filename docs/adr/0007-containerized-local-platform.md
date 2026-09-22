@@ -30,11 +30,14 @@ volumes and topic initialization. Runtime credentials come from environment vari
 the example defaults are for development only, with no real secrets or credentials in
 Dockerfiles/build arguments. No image is published by this milestone.
 
-The API exposes only loopback HTTP and has an Actuator healthcheck. The processor has
+The API exposes only loopback HTTP and has an Actuator healthcheck. At M1, the processor has
 no HTTP server. Do not add a fake process-only healthcheck: running is not evidence
 that its Kafka listener works. Validate through real payments, and defer listener
 health monitoring to M4. Keep manual recovery and non-atomic rejection notification
 semantics from ADR 0006 unchanged. An outbox remains deferred per ROADMAP.md.
+
+2026-09-22 update: [ADR 0010](0010-processor-listener-health.md) adds HTTP listener
+health to newly built processors. Published M2 images retain the original behavior.
 
 ## Tradeoff and learning exercise
 

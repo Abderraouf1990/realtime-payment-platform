@@ -72,6 +72,10 @@ spec:
             - {name: MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED, value: "true"}
             {{- else }}
             - {name: KAFKA_CONSUMER_GROUP, value: "{{ $.Release.Name }}-processor"}
+            {{- if $.Values.processor.healthProbes.enabled }}
+            - {name: PROCESSOR_ADDRESS, value: "0.0.0.0"}
+            - {name: PROCESSOR_PORT, value: "8081"}
+            {{- end }}
             - {name: POSTGRES_HOST, value: "{{ $.Release.Name }}-postgres"}
             {{- range $env, $key := dict "POSTGRES_DB" "database" "POSTGRES_USER" "username" "POSTGRES_PASSWORD" "password" }}
             - name: {{ $env }}
@@ -90,6 +94,19 @@ spec:
             periodSeconds: 5
           livenessProbe:
             httpGet: {path: /actuator/health/liveness, port: http}
+            periodSeconds: 10
+            failureThreshold: 6
+          {{- else if $.Values.processor.healthProbes.enabled }}
+          ports: [{name: health, containerPort: 8081}]
+          startupProbe:
+            httpGet: {path: /actuator/health/liveness, port: health}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /actuator/health/readiness, port: health}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /actuator/health/liveness, port: health}
             periodSeconds: 10
             failureThreshold: 6
           {{- else }}

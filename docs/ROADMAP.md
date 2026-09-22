@@ -14,19 +14,20 @@ Build practical expertise in AI engineering and demonstrate senior DevSecOps cap
 | M1 | Containerize API and processor | Completed locally and in CI | Image construction and Compose acceptance passed on GitHub for cca00ee: non-root, accepted payment, duplicate, durable rejection, Kafka event and down/up retention. See PROJECT_STATE.md. |
 | M2 | Secure image delivery | Completed for cca00ee | Authorized manual run 35661616528 passed all gates and published both images. Registry manifests/configs independently match the tested bundle, source SHA and non-root configuration. See PROJECT_STATE.md and docs/evidence/m2-publication.json. |
 | M3 | Local Kubernetes deployment | Completed locally | Isolated kind/Helm acceptance passed: M2 image digests, restricted non-root workloads, injected Secret, API/infra probes, payment outcomes, upgrade/rollback and PVC retention. Processor listener-health limitation is explicit in ADR 0009; no M3 CI claim. |
-| M4 | Observability and incident exercises | Next | Structured logs, metrics, distributed traces, listener-state monitoring, dashboards and runbooks; reproduce PostgreSQL outage, Kafka publication failure and malformed input. |
+| M4 | Observability and incident exercises | In progress | First slice: listener-health signal and PostgreSQL outage/manual-recovery E2E implemented; see PROJECT_STATE.md for validation. Structured logs, metrics, traces, dashboards, alerting and other incident exercises remain open. |
 | M5 | Secure, evaluated incident assistant | Planned | RAG over versioned runbooks/ADRs; read-only incident evidence; sourced structured diagnosis and abstention; 15–20 evaluation cases including prompt injection; measure quality, latency and cost; authenticated access and redaction. |
 | M6 | Optional cloud demonstration | Deferred | Choose provider and budget explicitly; reproducible deployment and teardown; no cloud provisioning implied by this roadmap. |
 
 M1–M4 prepare the environment and evidence for M5. Keep these milestones bounded: AI must not be postponed indefinitely by additional payment features. Each milestone needs a reproducible demonstration, not a claim of production readiness.
 
-## Current task: M4, listener health and PostgreSQL incident
+## Current task: M4, structured processing logs and outcome metrics
 
-Begin M4 by exposing and testing the processor's Kafka-listener health, then
-reproduce a PostgreSQL outage and manual recovery using that signal. Preserve
-acknowledgement/replay semantics and document a runbook. This is the first bounded
-slice of M4; metrics, traces, dashboards and other incident exercises remain in
-the milestone. Keep new payment features and cloud deployment out of scope.
+Continue M4 with structured processing logs and bounded-cardinality outcome
+metrics. Keep transaction/correlation IDs in logs, not metric labels; define
+attempt-versus-unique-transaction semantics for replay. Preserve acknowledgement
+and manual recovery. Listener health and its PostgreSQL incident runbook are the
+first implemented slice; traces, dashboards, alerting and other incident exercises
+remain in the milestone. Keep new payment features and cloud deployment out of scope.
 M2 publication was authorized only for cca00ee; further Git pushes and image
 publications still require the user's approval.
 
@@ -70,3 +71,8 @@ publications still require the user's approval.
   retention were demonstrated. Listener monitoring remains explicit M4 work;
   start with that signal and a PostgreSQL outage/manual-recovery runbook.
   No cloud resources, Git push or new publication were used.
+- 2026-09-22: First M4 slice adds health for newly built processors and a PostgreSQL
+  outage/manual-recovery runbook. Published M2 digests are unchanged; processor Helm
+  probes are opt-in for a new image. M4 remains in progress; proceed to structured
+  logs and outcome metrics after the health slice's checks. No new publication,
+  push or cloud deployment is authorized by this implementation.

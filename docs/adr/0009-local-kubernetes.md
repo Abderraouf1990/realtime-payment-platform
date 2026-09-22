@@ -46,6 +46,10 @@ database and Kafka assertions validate processing. A technical failure can leave
 the JVM alive with a stopped listener; restore dependencies and restart the
 processor manually. Listener-state monitoring remains an explicit M4 task.
 
+2026-09-22 update: [ADR 0010](0010-processor-listener-health.md) implements the first
+M4 listener-health slice for new builds, with opt-in Helm probes. The default M2
+digests and the scope of the M3 validation above remain unchanged.
+
 ## Verification and limits
 
 `scripts/verify-kubernetes.ps1` owns a uniquely named kind cluster and private

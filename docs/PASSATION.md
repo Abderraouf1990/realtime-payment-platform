@@ -386,3 +386,68 @@ Historical focused commands (before the move to Failsafe; see README for current
 .\mvnw.cmd -o -pl transaction-processor -am '-Dtest=TransactionReceivedContractTests' '-Dsurefire.failIfNoSpecifiedTests=false' test
 .\mvnw.cmd -o '-pl=transaction-api,transaction-processor' -am '-Dtest=TransactionPublicationTests,TransactionProcessorApplicationTests' '-Dsurefire.failIfNoSpecifiedTests=false' test
 ```
+
+## M4 — santé du listener et incident PostgreSQL — 2026-09-22
+
+Le premier volet M4 ajoute la santé HTTP du listener aux nouvelles sources.
+Les mentions historiques « processor non-web » des ADR 0007/0009 restent
+vraies pour les images M2 publiées ; ADR 0010 décrit le nouveau comportement.
+La politique de reprise manuelle et les acquittements restent inchangés.
+L'objectif et les critères précédents sont conservés ci-dessous pour traçabilité.
+
+Validation locale du travail basé sur `7b31f6d` :
+
+- Le code, les POM et le chart confirmaient M0-M3 et l'absence de serveur HTTP
+  dans le processor M2 ; la prochaine tâche correspondait bien au premier volet M4.
+- Sept tests `KafkaListenerHealthIndicatorTests` passent (démarrage, absence,
+  fonctionnement, arrêt normal/anormal, pause, reprise), sans détail sensible.
+- L'E2E ciblé `PaymentFlowIT#databaseOutageLeavesOffsetUncommittedUntilManualRestartAndReplayIT`
+  passe avec les vrais JARs, Kafka 4.1.1 et PostgreSQL 17.6. Il conserve les
+  assertions de ledger/offset et ajoute listener/readiness 503, liveness 200,
+  JVM encore active, maintien de DOWN après retour de PostgreSQL seul, puis
+  retour UP et persistance unique après redémarrage manuel.
+- `.\mvnw.cmd -B -ntp clean verify` passe en 4:05 le 2026-09-22 : 101 tests,
+  81 Surefire et 20 Failsafe dont cinq E2E ; zéro échec, erreur ou test ignoré.
+  Les autres E2E vérifient aussi le démarrage sain ; le cas valide vérifie que
+  env/configprops/beans/metrics ne sont pas exposés sur le processor.
+- `helm lint deploy/helm/payments` et le même lint avec
+  `--set processor.healthProbes.enabled=true` passent. Le rendu avec une référence
+  d'image locale M4 a été inspecté : port 8081, interface pod, startup/liveness sur
+  liveness, readiness sur readiness. Cela ne vaut pas validation en cluster.
+- Journaux locaux : `%TEMP%/payments-m4-unit.log`, `%TEMP%/payments-m4-outage.log`,
+  `%TEMP%/payments-m4-verify.log`. Rapports XML et logs E2E sous les répertoires
+  `target/*-reports` habituels. Aucun nouveau run GitHub ni scan d'image M4 n'a
+  été exécuté. Les images M2 publiées et les services métier restent inchangés.
+- Le runbook propose l'exercice automatisé exécuté et une procédure manuelle JAR.
+  Cette procédure manuelle n'a pas été rejouée séparément dans cette session.
+  Les sondes Helm sont désactivées par défaut pour les anciennes images ; leur
+  validation avec une nouvelle image M4 reste à faire. Aucun commit, push ou
+  publication n'a été effectué pour ce volet.
+- Prochaine tâche M4 : logs de traitement structurés et métriques de résultats
+  à cardinalité bornée. Traces, alertes/dashboards et autres incidents restent ouverts.
+
+### Objectif de ce volet (conservé)
+
+Start M4 in [the approved roadmap](ROADMAP.md) with one bounded task: expose and
+test processor Kafka-listener health, then document a reproducible PostgreSQL
+outage/manual-recovery incident using that signal. A stopped listener must no
+longer be confused with a healthy running JVM. Preserve the existing acknowledgement
+and manual recovery semantics; do not silently add automatic retries or an outbox.
+
+M3 deployment acceptance passed locally; M2 remains verified for cca00ee. Subsequent
+M4 work will add the remaining metrics, traces, dashboards and incident exercises
+before M5. Existing M2 authorization does not authorize new Git pushes, future
+image publications or cloud provisioning.
+
+### Critères de ce volet (conservés)
+
+- A processor health signal distinguishes startup, a running listener and a listener
+  stopped by technical failure, without exposing credentials or payment payloads.
+- Unit/integration tests demonstrate the signal transition during a PostgreSQL
+  outage while retaining the no-premature-ack guarantee.
+- Restore PostgreSQL and restart the processor manually; verify replay/persistence
+  and the health signal's recovery. Document the commands in a runbook.
+- Explain readiness versus liveness and configure probes without creating an
+  automatic restart loop that changes the documented recovery strategy.
+- Run the full Maven lifecycle and record local results separately from CI; do not
+  publish new images or claim the old M2 digests contain the new observability code.

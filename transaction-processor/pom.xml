@@ -13,6 +13,11 @@
 	<description>transaction-processor</description>
 
 	<dependencies>
+		<!-- HTTP is used only for Actuator health; no payment REST endpoints. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-webmvc</artifactId>
+		</dependency>
 		<dependency>
 			<groupId>com.aayadi.payment</groupId>
 			<artifactId>shared-contracts</artifactId>
