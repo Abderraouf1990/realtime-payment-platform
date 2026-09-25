@@ -598,7 +598,15 @@ See [ADR 0011](docs/adr/0011-processing-logs-and-attempt-metrics.md) and the run
 for the precise limits. Built-in framework metrics are also visible on this local
 management surface; no collector or external exposure is introduced.
 
-M4 remains in progress: distributed traces, progress/lag metrics, alerting,
+New source builds propagate W3C trace context from HTTP through Kafka to each
+processor attempt and rejection publication. Processor JSON logs include scoped
+traceId/spanId independently of business correlationId. Sampling defaults to 10%;
+export defaults to disabled (`TRACING_EXPORT_ENABLED`, `TRACING_SAMPLE_PROBABILITY`,
+`TRACING_ENDPOINT`). See [ADR 0012](docs/adr/0012-http-kafka-tracing.md) and the
+[local trace exercise](docs/runbooks/http-kafka-tracing.md), including exporter
+failure and manual replay. Published M2 images do not include this instrumentation.
+
+M4 remains in progress: progress/lag metrics, collection, alerting,
 dashboards and the remaining incident exercises are still pending.
 
 ## Secure image delivery (M2)

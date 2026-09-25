@@ -1,6 +1,6 @@
 # Project State
 
-Updated: 2026-09-22
+Updated: 2026-09-25
 
 ## Objectif principal et statuts actuels
 
@@ -9,11 +9,11 @@ DevSecOps senior avec une plateforme de paiement déployable et un assistant
 d'incident sécurisé et évalué. Les décisions de paiement restent déterministes.
 L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
 
-| Statut | Situation vérifiée au 2026-09-22 |
+| Statut | Situation au 2026-09-25 |
 | --- | --- |
 | TERMINÉ | M0 à M2 selon les [preuves datées](PASSATION.md#validated-state) ; M3 validé localement et commité dans `6c84939`. Cela ne constitue pas une validation CI de M3. |
-| EN COURS | M4 : santé du listener commitée ; logs structurés et métriques de tentatives validés localement. Les autres travaux d'observabilité restent ouverts. |
-| À FAIRE | M4 : traces, métriques de progression/lag, collecte, alertes, dashboards et autres incidents ; M5 : assistant d'incident. Les critères de la prochaine tâche restent en fin de fichier. |
+| EN COURS | M4 : santé, logs et compteurs commités (`71b94ff`) ; propagation des traces validée localement sur le travail non commité basé sur cette révision. Les autres travaux d'observabilité restent ouverts. |
+| À FAIRE | M4 : métriques de progression/lag, collecte, alertes, dashboards et autres incidents ; M5 : assistant d'incident. Les critères de la prochaine tâche restent en fin de fichier. |
 | BLOQUÉ | Aucun blocage actuel démontré pour poursuivre M4. Une nouvelle publication, un push ou un déploiement cloud restent soumis à autorisation ; ce ne sont pas des prérequis au travail local. |
 | ABANDONNÉ | Aucun nouvel abandon observé. L'outbox et M6 restent différés, pas abandonnés. |
 
@@ -108,8 +108,30 @@ L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
   and offset-commit failures are outside the counter. Recording failures cannot
   turn processing success into failure or mask its original sanitized error.
 
+- Source builds now use Boot-managed Micrometer/Brave W3C propagation across HTTP,
+  Kafka intake, processor delivery and rejection publication. Scoped traceId/spanId
+  enrich processor logs independently of business IDs. Export is opt-in, sampling
+  defaults to 10%; no new collector deployment or business/schema change is added.
+  See [ADR 0012](adr/0012-http-kafka-tracing.md) and the
+  [trace exercise](runbooks/http-kafka-tracing.md).
+
 ## Validated State
 
+- M4, traces (2026-09-25, travail local non commité basé sur `71b94ff`) :
+  `.\mvnw.cmd -B -ntp clean verify` affiche BUILD SUCCESS en 5:07, terminé à
+  11:11:24 +02:00. Rapports XML : 108 tests (87 Surefire, 21 Failsafe dont six
+  E2E), zéro échec, erreur ou ignoré. La chaîne parent/enfant HTTP → Kafka →
+  processor → rejet est vérifiée sur les spans exportés des vrais JARs.
+  Messages sans contexte/invalide et retry HTTP restent isolés ; le replay
+  conserve la trace avec un nouveau span. Une réponse 503 de l'exporteur
+  n'empêche ni l'arrêt sans ack sur panne SQL ni le replay/ack après reprise
+  manuelle. Santé, logs, compteurs et invariants métier restent couverts.
+  Journal : `artifacts/m4-tracing-verify.log` ; spans/logs E2E dans
+  `payment-e2e-tests/target/failsafe-reports/`. Aucun blocage restant démontré.
+  Aucun commit, push, nouvelle CI, scan/publication d'image ou déploiement M4
+  effectué. Les preuves CI de `cca00ee` ne couvrent pas ces changements.
+  Détails, correction du test asynchrone et exercice : [PASSATION.md](PASSATION.md)
+  et [runbook traces](runbooks/http-kafka-tracing.md).
 - M4, logs/métriques (2026-09-22, travail local basé sur `10a6808`) : les cinq
   E2E ciblés passent, puis `.\mvnw.cmd -B -ntp clean verify` réussit en 4:16 :
   107 tests (87 Surefire, 20 Failsafe dont cinq E2E), aucun échec, erreur ou ignoré.
@@ -117,7 +139,8 @@ L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
   compteur ; les E2E lisent les vrais logs JSON et compteurs HTTP, avec les
   assertions ledger/offset/santé conservées et le reset après redémarrage vérifié.
   Aucun commit, push, run CI ou publication d'image pour ce volet dans cette session.
-  ADR 0011 et le runbook détaillent les limites ; preuves/commandes dans PASSATION.md.
+  Ce volet est désormais commité dans `71b94ff`. ADR 0011 et le runbook détaillent
+  les limites ; preuves/commandes dans PASSATION.md.
 - M4, premier volet (2026-09-22, travail local basé sur `7b31f6d`) : sept nouveaux
   tests unitaires et l'E2E PostgreSQL ciblé passent. Le cycle complet
   `.\mvnw.cmd -B -ntp clean verify` passe en 4:05 : 101 tests (81 Surefire,
@@ -157,6 +180,7 @@ and [ADR 0005](adr/0005-durable-business-rejections.md), extended by
 [ADR 0009](adr/0009-local-kubernetes.md).
 Source-built processor health follows [ADR 0010](adr/0010-processor-listener-health.md).
 Processing logs/counters follow [ADR 0011](adr/0011-processing-logs-and-attempt-metrics.md).
+HTTP/Kafka tracing follows [ADR 0012](adr/0012-http-kafka-tracing.md).
 
 - `Idempotency-Key` must equal the client-supplied `transactionId`; Kafka uses that
   ID as its record key. This does not guarantee ordering across an account.
@@ -210,9 +234,9 @@ Processing logs/counters follow [ADR 0011](adr/0011-processing-logs-and-attempt-
   offset commits. The end-to-end test simulates server unavailability by stopping
   PostgreSQL, not a network partition; processor tests separately inject commit failure.
 - Add authentication, status lookup,
-  distributed traces, progress/lag metrics, collection and operational dashboards. Outcome
-  counters now exist but are non-durable attempt telemetry. The event field
-  supplies correlation metadata; it does not itself implement distributed tracing.
+  progress/lag metrics, collection and operational dashboards. Traces and outcome
+  counters are best-effort attempt telemetry, not durable audit. Business correlation
+  remains independent of the W3C context carried in transport headers.
 - Spring Boot manages JUnit Jupiter 6.0.3, required by Spring Framework 7. AGENTS.md
   now reflects the actual version and includes the payment-e2e-tests module.
 - Failsafe is active in `integration-test` / `verify` for `*IT` tests. All container
@@ -223,24 +247,21 @@ Processing logs/counters follow [ADR 0011](adr/0011-processing-logs-and-attempt-
 
 ## Next Objective
 
-Continue M4 in [the approved roadmap](ROADMAP.md): propagate distributed trace
-context from HTTP intake through Kafka to processor execution, with tests proving
-the causal relationship and keeping business correlationId independent of trace IDs.
-Preserve manual recovery, acknowledgement ordering and deterministic business rules.
-
-M3 deployment acceptance passed locally; M2 remains verified for cca00ee. Subsequent
-M4 work will add the remaining metrics, traces, dashboards and incident exercises
-before M5. Existing M2 authorization does not authorize new Git pushes, future
-image publications or cloud provisioning.
+Continue M4: expose and verify bounded processor progress/consumer-lag metrics,
+then document how to distinguish an idle consumer, accumulating backlog and a
+stopped listener. Reuse the existing health/attempt/trace evidence and preserve
+manual recovery and acknowledgement ordering. Do not add payment features.
 
 ## Acceptance Criteria for the Next Objective
 
-- HTTP producer and Kafka consumer spans retain a testable causal relationship;
-  an event without trace context is still processed correctly.
-- Keep correlationId and transactionId semantics unchanged; do not put payloads,
-  account data, credentials or unbounded IDs in metric labels.
-- Document retry/replay trace semantics and test context isolation between events;
-  tracing/export failures must not acknowledge failed processing or change recovery.
-- Run the full Maven lifecycle, retain health/log/counter/outage coverage, and
-  document a reproducible local trace exercise without publishing new images.
-- Earlier objectives and their criteria are preserved in [PASSATION.md](PASSATION.md).
+- Define lag and progress precisely, including their source, labels and behavior
+  before assignment, after restart and while the broker is unavailable.
+- Demonstrate backlog growth during a stopped/paused consumer and reduction after
+  manual recovery; an idle healthy consumer must not be classified as stalled.
+- Keep business identifiers, payload and credentials out of metric labels;
+  metric collection must not alter processing or offset commits.
+- Run the full Maven lifecycle, preserving health/log/trace/outage coverage, and
+  provide a reproducible local exercise. Record local results separately from CI.
+- M4 remains in progress; collection, dashboards, alerts and additional incident
+  exercises still precede M5. No new publication, push or cloud deployment is implied.
+- Previous objectives and criteria are preserved in [PASSATION.md](PASSATION.md).

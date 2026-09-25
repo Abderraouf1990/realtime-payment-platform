@@ -1,6 +1,6 @@
 # Passation — historique et preuves
 
-Updated: 2026-09-22
+Updated: 2026-09-25
 
 ## Rôle de ce document
 
@@ -519,3 +519,84 @@ image publications or cloud provisioning.
   de PROJECT_STATE sont déplacés ci-dessus. Son prochain objectif est maintenant
   la propagation du contexte de trace HTTP/Kafka. Aucun commit, push, run CI,
   déploiement Kubernetes M4 ou publication d'image pour ce volet dans cette session.
+
+## M4 — traces HTTP/Kafka — 2026-09-25
+
+État initial propre à `71b94ff` : les logs/métriques sont désormais commités.
+Les anciens « aucun commit » décrivent leurs sessions historiques ; la CI de
+ce commit n’a pas été vérifiée dans cette session. POM, séparation des modules,
+contraintes SQL, ordre commit/publication/ack et images Helm correspondent aux
+documents. AGENTS.md ne nécessite aucune correction.
+
+### Objectif et critères conservés
+
+## Next Objective
+
+Continue M4 in [the approved roadmap](ROADMAP.md): propagate distributed trace
+context from HTTP intake through Kafka to processor execution, with tests proving
+the causal relationship and keeping business correlationId independent of trace IDs.
+Preserve manual recovery, acknowledgement ordering and deterministic business rules.
+
+M3 deployment acceptance passed locally; M2 remains verified for cca00ee. Subsequent
+M4 work will add the remaining metrics, traces, dashboards and incident exercises
+before M5. Existing M2 authorization does not authorize new Git pushes, future
+image publications or cloud provisioning.
+
+## Acceptance Criteria for the Next Objective
+
+- HTTP producer and Kafka consumer spans retain a testable causal relationship;
+  an event without trace context is still processed correctly.
+- Keep correlationId and transactionId semantics unchanged; do not put payloads,
+  account data, credentials or unbounded IDs in metric labels.
+- Document retry/replay trace semantics and test context isolation between events;
+  tracing/export failures must not acknowledge failed processing or change recovery.
+- Run the full Maven lifecycle, retain health/log/counter/outage coverage, and
+  document a reproducible local trace exercise without publishing new images.
+- Earlier objectives and their criteria are preserved in [PASSATION.md](PASSATION.md).
+
+### Réalisation, compromis et exercice
+
+- Ajout du starter Zipkin géré par Boot 4.0.8 dans les deux applications et des
+  options d'observation Kafka/W3C. Les services métier, contrats, migrations et
+  politiques d'acquittement/reprise restent inchangés. Le JAR API ne contient
+  toujours ni PostgreSQL, ni spring-jdbc, ni Hibernate core.
+- Les logs processor portent traceId/spanId en plus des IDs métier ; aucun
+  identifiant métier n'est ajouté aux tags de métriques ou de spans. L'export
+  est opt-in et l'échantillonnage est de 10% par défaut. Les E2E utilisent 100%
+  et un récepteur Zipkin HTTP local, sans infrastructure externe.
+- Compromis : l'instrumentation native évite un protocole ou des wrappers métier
+  spécifiques, mais les traces sont échantillonnées et peuvent être perdues lors
+  d'une panne d'export. Elles ne remplacent ni l'audit SQL ni les offsets Kafka.
+  Les frontières de spans et les limites sont décrites dans ADR 0012.
+- Exercice reproductible : [runbook HTTP/Kafka](runbooks/http-kafka-tracing.md).
+  Exécuter le scénario ciblé puis suivre les parentId dans spans.json ; comparer
+  correlationId, traceId et spanId dans les logs, puis rejouer le scénario de panne.
+
+### Vérifications et incidents résolus
+
+- Maven a d'abord rencontré un refus d'écriture du sandbox dans le cache `.m2`.
+  Le lancement autorisé hors sandbox a téléchargé les dépendances et packagé
+  les applications. Aucun contournement ni modification des règles de sécurité.
+- Premier lancement des six E2E : cinq passent, le nouveau scénario échoue avec
+  NoSuchElementException lors de la lecture d'un span encore en attente d'export.
+  La chaîne causale était déjà correcte. L'assertion utilise désormais une liste
+  et attend sa taille, afin qu'Awaitility réessaie jusqu'à l'arrivée asynchrone.
+  Journal conservé : `artifacts/m4-tracing-e2e.log`.
+- Le cycle complet suivant `.\mvnw.cmd -B -ntp clean verify` affiche BUILD SUCCESS
+  en 5:07, terminé le 2026-09-25 à 11:11:24 +02:00. Recompte indépendant des XML :
+  87 Surefire + 21 Failsafe = 108 tests ; aucun échec, erreur ou ignoré.
+  Les six E2E passent. Journal : `artifacts/m4-tracing-verify.log` ; rapports XML,
+  logs des vrais JARs et spans.json dans les répertoires target/*-reports.
+- Le nouveau scénario vérifie les quatre spans HTTP/API producer/processor
+  consumer/rejection producer et leurs parentId, le lien log/span, les messages
+  sans contexte ou avec traceparent invalide et le retry HTTP à IDs métier constants.
+  Les comptes ledger/audit, offsets et quatre séries de métriques restent vérifiés.
+- Le scénario PostgreSQL conserve santé/readiness/liveness et absence d'ack sur
+  panne. Le récepteur retourne aussi 503, vérifié par un compteur de requêtes :
+  après restauration SQL et redémarrage manuel, le replay réussit et avance
+  l'offset malgré cette panne d'export. Les deux tentatives ont le même traceId
+  et des spanId distincts. Aucun ack n'est conditionné par la réception d'un span.
+- Validation locale du travail non commité basé sur `71b94ff`. Aucun nouveau
+  commit, push, run CI, scan/publication d'image, déploiement Kubernetes ou cloud.
+  M2 reste validé pour `cca00ee` seulement ; M4 reste en cours. Prochaine tâche
+  exacte : exposer et tester les métriques bornées de progression/lag du processor.

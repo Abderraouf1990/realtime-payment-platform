@@ -43,11 +43,13 @@ class PaymentFlowIT {
     private HttpClient http;
     private int port;
     private String scenario;
+    private TraceCollector traces;
 
     @BeforeEach
     void startEnvironment(TestInfo test) throws Exception {
         scenario = test.getTestMethod().orElseThrow().getName();
         Files.createDirectories(LOGS.resolve(scenario));
+        traces = manage(new TraceCollector(LOGS.resolve(scenario).resolve("spans.json")));
         // Register before starting: @AfterEach also runs when this setup fails partway through.
         kafka = manage(new KafkaContainer("apache/kafka:4.1.1"));
         postgres = manage(new PostgreSQLContainer("postgres:17.6"));
@@ -144,6 +146,8 @@ class PaymentFlowIT {
     @Test
     void databaseOutageLeavesOffsetUncommittedUntilManualRestartAndReplayIT() throws Exception {
         String original = insertValidTransaction();
+        // Export failure is independent of both business success and database failure.
+        traces.unavailable(true);
         // Stop the server, preserving the container and its data for recovery.
         postgres.getDockerClient().stopContainerCmd(postgres.getContainerId()).withTimeout(1).exec();
         post(http, port, "TX-OUTAGE", body("TX-OUTAGE", "CORR-OUTAGE", "5.00", "EUR"));
@@ -154,6 +158,8 @@ class PaymentFlowIT {
 
         assertAttempts(processor, 1, 0, 0, 1);
         assertProcessingLog(processor, "TX-OUTAGE", "CORR-OUTAGE", "technical_failure", List.of("PROCESSING_FAILURE"));
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() ->
+                assertThat(traces.failedRequests()).isPositive());
 
         postgres.getDockerClient().startContainerCmd(postgres.getContainerId()).exec();
         await().atMost(Duration.ofSeconds(30)).ignoreExceptions().untilAsserted(() ->
@@ -172,6 +178,96 @@ class PaymentFlowIT {
         // Counters belong to this JVM, not to the durable ledger or previous process.
         assertAttempts(restarted, 1, 0, 0, 0);
         assertProcessingLog(restarted, "TX-OUTAGE", "CORR-OUTAGE", "accepted", List.of());
+        var failed = processingLog(processor, "TX-OUTAGE", "technical_failure");
+        var replay = processingLog(restarted, "TX-OUTAGE", "accepted");
+        assertThat(replay.get("traceId").asString()).isEqualTo(failed.get("traceId").asString());
+        assertThat(replay.get("spanId").asString()).isNotEqualTo(failed.get("spanId").asString());
+        // Successful replay was acknowledged even while the trace endpoint still returns 503.
+        traces.unavailable(false);
+    }
+
+    @Test
+    void tracesLinkHttpKafkaAndRejectionAndIsolateUntracedEventsIT() throws Exception {
+        String traceId = "1234567890abcdef1234567890abcdef";
+        String upstream = "1234567890abcdef";
+        post(http, port, "TX-TRACE", body("TX-TRACE", "CORR-SHARED", "-1.00", "EUR"),
+                "00-" + traceId + "-" + upstream + "-01");
+        awaitOffset(admin, 1);
+        assertProcessingLog(processor, "TX-TRACE", "CORR-SHARED", "rejected", List.of("AMOUNT_NOT_POSITIVE"));
+        var log = processingLog(processor, "TX-TRACE", "rejected");
+        assertThat(log.get("traceId").asString()).isEqualTo(traceId);
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
+            var trace = traces.spans().stream().filter(s -> s.path("traceId").asString().equals(traceId)).toList();
+            var server = oneSpan(trace, "SERVER", "transaction-api");
+            var producer = oneSpan(trace, "PRODUCER", "transaction-api");
+            var consumer = oneSpan(trace, "CONSUMER", "transaction-processor");
+            var rejection = oneSpan(trace, "PRODUCER", "transaction-processor");
+            assertThat(server.path("parentId").asString()).isEqualTo(upstream);
+            assertThat(producer.path("parentId").asString()).isEqualTo(server.path("id").asString());
+            assertThat(consumer.path("parentId").asString()).isEqualTo(producer.path("id").asString());
+            assertThat(rejection.path("parentId").asString()).isEqualTo(consumer.path("id").asString());
+            assertThat(consumer.path("id").asString()).isEqualTo(log.get("spanId").asString());
+            assertThat(trace.toString()).doesNotContain("ACC-E2E", "accountId", "CORR-SHARED", "TX-TRACE", "password");
+        });
+
+        // Same partition/listener thread, but no transport tracing and the same business correlation.
+        publishWithoutContext("TX-NO-TRACE", false);
+        awaitOffset(admin, 2);
+        assertProcessingLog(processor, "TX-NO-TRACE", "CORR-SHARED", "accepted", List.of());
+        var fresh = processingLog(processor, "TX-NO-TRACE", "accepted");
+        assertThat(fresh.get("traceId").asString()).hasSize(32).isNotEqualTo(traceId);
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
+            var roots = traces.spans().stream().filter(s -> s.path("id").asString()
+                    .equals(fresh.get("spanId").asString())).toList();
+            assertThat(roots).hasSize(1);
+            assertThat(roots.getFirst().has("parentId")).isFalse();
+        });
+        publishWithoutContext("TX-BAD-TRACE", true);
+        awaitOffset(admin, 3);
+        assertProcessingLog(processor, "TX-BAD-TRACE", "CORR-SHARED", "accepted", List.of());
+        assertThat(processingLog(processor, "TX-BAD-TRACE", "accepted").get("traceId").asString())
+                .isNotEqualTo(traceId).isNotEqualTo(fresh.get("traceId").asString());
+
+        // A repeated HTTP request gets a new trace despite identical business identity.
+        post(http, port, "TX-NO-TRACE", body("TX-NO-TRACE", "CORR-SHARED", "42.00", "EUR"));
+        awaitOffset(admin, 4);
+        assertProcessingLog(processor, "TX-NO-TRACE", "CORR-SHARED", "duplicate", List.of());
+        assertThat(processingLog(processor, "TX-NO-TRACE", "duplicate").get("traceId").asString())
+                .isNotEqualTo(traceId).isNotEqualTo(fresh.get("traceId").asString());
+        assertThat(total(postgres)).isEqualTo(2);
+        assertThat(rejectionCount("TX-TRACE")).isEqualTo(1);
+        assertAttempts(processor, 2, 1, 1, 0);
+    }
+
+    private static tools.jackson.databind.JsonNode oneSpan(List<tools.jackson.databind.JsonNode> trace,
+                                                          String kind, String service) {
+        var matches = trace.stream().filter(s -> s.path("kind").asString().equals(kind)
+                && s.path("localEndpoint").path("serviceName").asString().equals(service)).toList();
+        assertThat(matches).hasSize(1);
+        return matches.getFirst();
+    }
+
+    private tools.jackson.databind.JsonNode processingLog(RunningApp app, String id, String outcome) throws Exception {
+        var mapper = JsonMapper.builder().build();
+        return Files.readAllLines(app.log()).stream().filter(l -> l.startsWith("{"))
+                .map(mapper::readTree).filter(j -> j.path("event").asString().equals("payment.processing")
+                        && j.path("transactionId").asString().equals(id) && j.path("outcome").asString().equals(outcome))
+                .findFirst().orElseThrow();
+    }
+
+    private void publishWithoutContext(String id, boolean malformed) throws Exception {
+        var json = JsonMapper.builder().build().readTree(body(id, "CORR-SHARED", "42.00", "EUR"));
+        var event = (tools.jackson.databind.node.ObjectNode) json;
+        event.put("schemaVersion", 1);
+        event.put("receivedAt", "2026-09-25T00:00:00Z");
+        try (var producer = new org.apache.kafka.clients.producer.KafkaProducer<String, String>(
+                Map.of("bootstrap.servers", kafka.getBootstrapServers()),
+                new org.apache.kafka.common.serialization.StringSerializer(),
+                new org.apache.kafka.common.serialization.StringSerializer())) {
+            var record = new org.apache.kafka.clients.producer.ProducerRecord<String, String>(TOPIC, id, event.toString());
+            if (malformed) record.headers().add("traceparent", "invalid".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            producer.send(record).get(10, TimeUnit.SECONDS);
+        }
     }
 
     private void assertAttempts(RunningApp app, int accepted, int duplicate, int rejected, int failed) throws Exception {
@@ -249,7 +345,7 @@ class PaymentFlowIT {
         return row(postgres, "TX-E2E");
     }
 
-    private static RunningApp launchProcessor(String log, KafkaContainer kafka, PostgreSQLContainer postgres) throws Exception {
+    private RunningApp launchProcessor(String log, KafkaContainer kafka, PostgreSQLContainer postgres) throws Exception {
         return launch("transaction-processor", log, kafka, List.of(
                 "--server.port=0",
                 "--spring.datasource.url=" + jdbcUrl(postgres),
@@ -260,7 +356,7 @@ class PaymentFlowIT {
                 "--spring.kafka.consumer.group-id=" + GROUP));
     }
 
-    private static RunningApp launch(String module, String log, KafkaContainer kafka, List<String> extra) throws Exception {
+    private RunningApp launch(String module, String log, KafkaContainer kafka, List<String> extra) throws Exception {
         var root = Path.of(System.getProperty("repository.root"));
         var jar = root.resolve(module).resolve("target")
                 .resolve(module + "-" + System.getProperty("application.version") + ".jar");
@@ -268,6 +364,9 @@ class PaymentFlowIT {
         var java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
         var command = new ArrayList<>(List.of(java, "-jar", jar.toString(),
                 "--spring.kafka.bootstrap-servers=" + kafka.getBootstrapServers(),
+                "--management.tracing.sampling.probability=1.0",
+                "--management.tracing.export.zipkin.enabled=true",
+                "--management.tracing.export.zipkin.endpoint=" + traces.endpoint(),
                 "--payments.kafka.received-topic=" + TOPIC));
         command.addAll(extra);
         var output = LOGS.resolve(log);
@@ -277,9 +376,15 @@ class PaymentFlowIT {
     }
 
     private static void post(HttpClient http, int port, String id, String body) throws Exception {
-        var request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/transactions"))
+        post(http, port, id, body, null);
+    }
+
+    private static void post(HttpClient http, int port, String id, String body, String traceparent) throws Exception {
+        var builder = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/transactions"))
                 .timeout(Duration.ofSeconds(20)).header("Content-Type", "application/json")
-                .header("Idempotency-Key", id).POST(HttpRequest.BodyPublishers.ofString(body)).build();
+                .header("Idempotency-Key", id).POST(HttpRequest.BodyPublishers.ofString(body));
+        if (traceparent != null) builder.header("traceparent", traceparent);
+        var request = builder.build();
         var response = http.send(request, HttpResponse.BodyHandlers.ofString());
         assertThat(response.statusCode()).as(response.body()).isEqualTo(202);
         assertThat(response.body()).contains(id);

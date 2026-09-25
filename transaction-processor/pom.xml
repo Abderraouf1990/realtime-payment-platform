@@ -13,6 +13,10 @@
 	<description>transaction-processor</description>
 
 	<dependencies>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-zipkin</artifactId>
+		</dependency>
 		<!-- HTTP is used only for Actuator health; no payment REST endpoints. -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
