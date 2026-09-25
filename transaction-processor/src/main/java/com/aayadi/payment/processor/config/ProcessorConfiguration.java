@@ -14,8 +14,10 @@ import org.springframework.jdbc.support.JdbcTransactionManager;
 import org.springframework.kafka.listener.CommonErrorHandler;
 import javax.sql.DataSource;
 import java.time.Clock;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 @Configuration(proxyBeanMethods = false)
+@EnableScheduling
 public class ProcessorConfiguration {
     @Bean
     Clock clock() {

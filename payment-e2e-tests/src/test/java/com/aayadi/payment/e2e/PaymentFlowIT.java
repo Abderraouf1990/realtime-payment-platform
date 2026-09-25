@@ -88,7 +88,17 @@ class PaymentFlowIT {
 
     @Test
     void validHttpCreatesOneLedgerRowIT() throws Exception {
+        assertLag(processor, 0);
+        assertThat(progressMetric(processor, "progress.age")).isEqualTo(-1);
         insertValidTransaction();
+        assertLag(processor, 0);
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() ->
+                assertThat(progressMetric(processor, "progress.age")).isGreaterThanOrEqualTo(0));
+        // A healthy idle listener stays at zero lag even as the last progress ages.
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() ->
+                assertThat(progressMetric(processor, "progress.age")).isGreaterThan(1));
+        assertLag(processor, 0);
+        awaitHealth(processor, 200, "RUNNING");
         assertThat(total(postgres)).isEqualTo(1);
         assertThat(rejectionCount("TX-E2E")).isZero();
         for (var endpoint : List.of("env", "configprops", "beans")) {
@@ -156,6 +166,10 @@ class PaymentFlowIT {
         awaitHealth(processor, 503, "STOPPED");
         assertThat(committed(admin)).isEqualTo(1);
 
+        assertLag(processor, 1);
+        post(http, port, "TX-BACKLOG", body("TX-BACKLOG", "CORR-BACKLOG", "7.00", "EUR"));
+        assertLag(processor, 2);
+        assertThat(committed(admin)).isEqualTo(1);
         assertAttempts(processor, 1, 0, 0, 1);
         assertProcessingLog(processor, "TX-OUTAGE", "CORR-OUTAGE", "technical_failure", List.of("PROCESSING_FAILURE"));
         await().atMost(Duration.ofSeconds(15)).untilAsserted(() ->
@@ -171,12 +185,14 @@ class PaymentFlowIT {
         var restarted = manage(launchProcessor(scenario + "/processor-restarted.log", kafka, postgres));
         restarted.awaitLog("Started TransactionProcessorApplication");
         awaitHealth(restarted, 200, "RUNNING");
-        awaitOffset(admin, 2);
+        awaitOffset(admin, 3);
         assertThat(count(postgres, "TX-OUTAGE")).isEqualTo(1);
+        assertThat(count(postgres, "TX-BACKLOG")).isEqualTo(1);
         assertThat(row(postgres, "TX-E2E")).isEqualTo(original);
-        assertThat(total(postgres)).isEqualTo(2);
+        assertThat(total(postgres)).isEqualTo(3);
+        assertLag(restarted, 0);
         // Counters belong to this JVM, not to the durable ledger or previous process.
-        assertAttempts(restarted, 1, 0, 0, 0);
+        assertAttempts(restarted, 2, 0, 0, 0);
         assertProcessingLog(restarted, "TX-OUTAGE", "CORR-OUTAGE", "accepted", List.of());
         var failed = processingLog(processor, "TX-OUTAGE", "technical_failure");
         var replay = processingLog(restarted, "TX-OUTAGE", "accepted");
@@ -184,6 +200,37 @@ class PaymentFlowIT {
         assertThat(replay.get("spanId").asString()).isNotEqualTo(failed.get("spanId").asString());
         // Successful replay was acknowledged even while the trace endpoint still returns 503.
         traces.unavailable(false);
+    }
+
+    @Test
+    void brokerOutageMakesLagUnknownWithoutBlockingManagementIT() throws Exception {
+        insertValidTransaction();
+        assertLag(processor, 0);
+        kafka.getDockerClient().stopContainerCmd(kafka.getContainerId()).withTimeout(1).exec();
+        await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> {
+            assertThat(progressMetric(processor, "observation.available")).isZero();
+            assertThat(progressMetric(processor, "lag")).isEqualTo(-1);
+            assertThat(progressMetric(processor, "observation.age")).isGreaterThan(1);
+            assertThat(healthRequest(processor, "/actuator/health/liveness").statusCode()).isEqualTo(200);
+        });
+        assertThat(count(postgres, "TX-E2E")).isEqualTo(1);
+        assertAttempts(processor, 1, 0, 0, 0);
+    }
+
+    private void assertLag(RunningApp app, double expected) {
+        await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> {
+            assertThat(progressMetric(app, "observation.available")).isEqualTo(1);
+            assertThat(progressMetric(app, "lag")).isEqualTo(expected);
+            assertThat(progressMetric(app, "observation.age")).isLessThan(10);
+        });
+    }
+
+    private double progressMetric(RunningApp app, String suffix) throws Exception {
+        var response = healthRequest(app, "/actuator/metrics/payments.consumer." + suffix);
+        assertThat(response.statusCode()).as(response.body()).isEqualTo(200);
+        var json = JsonMapper.builder().build().readTree(response.body());
+        assertThat(json.get("availableTags").size()).isZero();
+        return json.get("measurements").get(0).get("value").asDouble();
     }
 
     @Test
@@ -348,6 +395,7 @@ class PaymentFlowIT {
     private RunningApp launchProcessor(String log, KafkaContainer kafka, PostgreSQLContainer postgres) throws Exception {
         return launch("transaction-processor", log, kafka, List.of(
                 "--server.port=0",
+                "--payments.monitoring.interval=500",
                 "--spring.datasource.url=" + jdbcUrl(postgres),
                 "--spring.datasource.username=" + postgres.getUsername(),
                 "--spring.datasource.password=" + postgres.getPassword(),

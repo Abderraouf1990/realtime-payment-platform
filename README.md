@@ -399,13 +399,14 @@ for reactor ordering and runs their executable JARs in separate JVMs. The API's
 runtime classpath has no PostgreSQL dependency. It sends real HTTP requests to a
 random port through Kafka into PostgreSQL, using `apache/kafka:4.1.1` and
 `postgres:17.6`. Its scenarios cover insertion, an identical HTTP retry, a payload
-conflict, negative amount, non-EUR currency, and PostgreSQL server unavailability.
+conflict, negative amount, non-EUR currency, PostgreSQL server unavailability,
+HTTP/Kafka trace isolation, and unavailable Kafka progress observation.
 The outage stops the disposable PostgreSQL server, confirms HTTP intake still
 succeeds and the failed event remains unacknowledged, then restarts the database
 and processor to prove successful replay. This exercises the existing manual
 restart strategy, not automatic retries. Short connection timeouts are test-only.
 Application logs are retained in `payment-e2e-tests/target/failsafe-reports`.
-`PaymentFlowIT` has five independent scenarios with shared setup/cleanup code and
+`PaymentFlowIT` has seven independent scenarios with shared setup/cleanup code and
 fresh containers and application processes per test. No scenario depends on test
 ordering or another test's rows/offsets. Logs are grouped by test method. Cleanup
 attempts to close every registered resource even after partial startup or test failure.
@@ -606,7 +607,15 @@ export defaults to disabled (`TRACING_EXPORT_ENABLED`, `TRACING_SAMPLE_PROBABILI
 [local trace exercise](docs/runbooks/http-kafka-tracing.md), including exporter
 failure and manual replay. Published M2 images do not include this instrumentation.
 
-M4 remains in progress: progress/lag metrics, collection, alerting,
+Source builds also expose four unlabelled `payments.consumer.*` gauges for
+group lag, observation availability/freshness and committed-offset progress.
+A separate bounded Kafka Admin poll continues observing a stopped listener;
+Actuator reads cached values. Unavailable lag is -1, not zero. See
+[ADR 0013](docs/adr/0013-consumer-progress-and-lag.md) and the
+[lag exercise](docs/runbooks/consumer-progress-and-lag.md) for idle/backlog,
+broker outage, reset and replica semantics.
+
+M4 remains in progress: collection, alerting,
 dashboards and the remaining incident exercises are still pending.
 
 ## Secure image delivery (M2)

@@ -12,8 +12,8 @@ L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
 | Statut | Situation au 2026-09-25 |
 | --- | --- |
 | TERMINÉ | M0 à M2 selon les [preuves datées](PASSATION.md#validated-state) ; M3 validé localement et commité dans `6c84939`. Cela ne constitue pas une validation CI de M3. |
-| EN COURS | M4 : santé, logs et compteurs commités (`71b94ff`) ; propagation des traces validée localement sur le travail non commité basé sur cette révision. Les autres travaux d'observabilité restent ouverts. |
-| À FAIRE | M4 : métriques de progression/lag, collecte, alertes, dashboards et autres incidents ; M5 : assistant d'incident. Les critères de la prochaine tâche restent en fin de fichier. |
+| EN COURS | M4 : santé, logs, compteurs et traces commités (`6130a81`) ; progression/lag validés localement sur le travail non commité basé sur cette révision (117 tests). Les autres travaux d'observabilité restent ouverts. |
+| À FAIRE | M4 : collecte, alertes, dashboards et autres incidents ; M5 : assistant d'incident. Les critères de la prochaine tâche restent en fin de fichier. |
 | BLOQUÉ | Aucun blocage actuel démontré pour poursuivre M4. Une nouvelle publication, un push ou un déploiement cloud restent soumis à autorisation ; ce ne sont pas des prérequis au travail local. |
 | ABANDONNÉ | Aucun nouvel abandon observé. L'outbox et M6 restent différés, pas abandonnés. |
 
@@ -115,8 +115,32 @@ L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
   See [ADR 0012](adr/0012-http-kafka-tracing.md) and the
   [trace exercise](runbooks/http-kafka-tracing.md).
 
+- Source-built processors now poll the configured topic/group's committed and
+  earliest/end offsets with a separate read-only Admin client. Four unlabelled
+  `payments.consumer.*` gauges expose lag, observation availability/age and
+  observed committed-progress age. HTTP reads are cached; failures produce
+  unavailable lag (-1), and listener stop does not stop sampling. The baseline
+  is group-wide, not local fetch position or unique payments. Default cadence
+  is 5 seconds with a 2-second query wait budget; restart forgets historical
+  progress but reads durable offsets. See [ADR 0013](adr/0013-consumer-progress-and-lag.md)
+  and the [lag exercise](runbooks/consumer-progress-and-lag.md).
+
 ## Validated State
 
+- M4, progression/lag (2026-09-25, travail non commité basé sur `6130a81`) :
+  `.\mvnw.cmd -B -ntp clean verify` réussit en 5:29, terminé à 11:36:12 +02:00,
+  code de sortie 0. Recompte XML : 117 tests (94 Surefire et 23 Failsafe,
+  dont sept E2E), aucun échec, erreur ou ignoré. Les sept nouveaux tests unitaires
+  couvrent états inconnus/idle, agrégation, progression, rétention, erreurs et resets.
+  KafkaProgressSourceIT observe deux partitions avant toute assignation sans commit.
+  Les vrais JARs démontrent lag 1 → 2 pendant l'arrêt du listener, puis 0 après
+  reprise manuelle, et lag -1/disponibilité 0 quand Kafka est indisponible.
+  Santé, traces, compteurs, persistance et absence d'ack prématuré restent vérifiés.
+  Journal : `artifacts/m4-progress-verify.log` ; rapports sous `target/*-reports`.
+  Aucun blocage restant démontré. Aucun commit, push, run CI, scan/publication
+  d'image ou déploiement M4 pour ce volet ; les preuves CI de M2 restent propres
+  à `cca00ee`. Exercice et limites : [runbook](runbooks/consumer-progress-and-lag.md),
+  [ADR 0013](adr/0013-consumer-progress-and-lag.md), détails dans [PASSATION.md](PASSATION.md).
 - M4, traces (2026-09-25, travail local non commité basé sur `71b94ff`) :
   `.\mvnw.cmd -B -ntp clean verify` affiche BUILD SUCCESS en 5:07, terminé à
   11:11:24 +02:00. Rapports XML : 108 tests (87 Surefire, 21 Failsafe dont six
@@ -132,6 +156,8 @@ L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
   effectué. Les preuves CI de `cca00ee` ne couvrent pas ces changements.
   Détails, correction du test asynchrone et exercice : [PASSATION.md](PASSATION.md)
   et [runbook traces](runbooks/http-kafka-tracing.md).
+  Ce volet a ensuite été commité dans `6130a81`, sans push, à la demande de
+  l'utilisateur. Les mentions « non commité » ci-dessus datent de sa validation.
 - M4, logs/métriques (2026-09-22, travail local basé sur `10a6808`) : les cinq
   E2E ciblés passent, puis `.\mvnw.cmd -B -ntp clean verify` réussit en 4:16 :
   107 tests (87 Surefire, 20 Failsafe dont cinq E2E), aucun échec, erreur ou ignoré.
@@ -181,6 +207,7 @@ and [ADR 0005](adr/0005-durable-business-rejections.md), extended by
 Source-built processor health follows [ADR 0010](adr/0010-processor-listener-health.md).
 Processing logs/counters follow [ADR 0011](adr/0011-processing-logs-and-attempt-metrics.md).
 HTTP/Kafka tracing follows [ADR 0012](adr/0012-http-kafka-tracing.md).
+Group progress/lag follows [ADR 0013](adr/0013-consumer-progress-and-lag.md).
 
 - `Idempotency-Key` must equal the client-supplied `transactionId`; Kafka uses that
   ID as its record key. This does not guarantee ordering across an account.
@@ -225,7 +252,7 @@ HTTP/Kafka tracing follows [ADR 0012](adr/0012-http-kafka-tracing.md).
   minimal notification contract does not identify each distinct rejected payload.
 - Define audit retention/access controls and operational recovery for malformed
   events; currently technical/contract failures stop consumption. Listener health
-  is available in new builds, but alerting and progress/lag monitoring remain absent.
+  and group progress/lag monitoring are available in new builds; alerting remains absent.
   RUNNING does not prove broker/database reachability, assigned partitions or progress.
   Idle PostgreSQL outages are detected only after a failed processing attempt.
 - M4 Helm probes are opt-in, disabled for the default M2 images; runtime deployment
@@ -234,7 +261,7 @@ HTTP/Kafka tracing follows [ADR 0012](adr/0012-http-kafka-tracing.md).
   offset commits. The end-to-end test simulates server unavailability by stopping
   PostgreSQL, not a network partition; processor tests separately inject commit failure.
 - Add authentication, status lookup,
-  progress/lag metrics, collection and operational dashboards. Traces and outcome
+  collection and operational dashboards. Traces and outcome
   counters are best-effort attempt telemetry, not durable audit. Business correlation
   remains independent of the W3C context carried in transport headers.
 - Spring Boot manages JUnit Jupiter 6.0.3, required by Spring Framework 7. AGENTS.md
@@ -247,21 +274,20 @@ HTTP/Kafka tracing follows [ADR 0012](adr/0012-http-kafka-tracing.md).
 
 ## Next Objective
 
-Continue M4: expose and verify bounded processor progress/consumer-lag metrics,
-then document how to distinguish an idle consumer, accumulating backlog and a
-stopped listener. Reuse the existing health/attempt/trace evidence and preserve
-manual recovery and acknowledgement ordering. Do not add payment features.
+Continue M4: add reproducible local metrics collection with a minimal dashboard
+and a tested backlog/observation-unavailable alert, using the existing listener,
+attempt and committed-lag signals. Keep this bounded to the incident demonstration
+before M5; no new payment feature, cloud provisioning or image publication.
 
 ## Acceptance Criteria for the Next Objective
 
-- Define lag and progress precisely, including their source, labels and behavior
-  before assignment, after restart and while the broker is unavailable.
-- Demonstrate backlog growth during a stopped/paused consumer and reduction after
-  manual recovery; an idle healthy consumer must not be classified as stalled.
-- Keep business identifiers, payload and credentials out of metric labels;
-  metric collection must not alter processing or offset commits.
-- Run the full Maven lifecycle, preserving health/log/trace/outage coverage, and
-  provide a reproducible local exercise. Record local results separately from CI.
-- M4 remains in progress; collection, dashboards, alerts and additional incident
-  exercises still precede M5. No new publication, push or cloud deployment is implied.
-- Previous objectives and criteria are preserved in [PASSATION.md](PASSATION.md).
+- Pin collector/dashboard images and keep access local; expose only the metrics
+  necessary for the exercise, without payloads, credentials or business-ID labels.
+- Show healthy idle consumption, stopped-listener backlog, manual drain and lost
+  observations, accounting for sampling freshness and JVM counter resets.
+- Demonstrate an alert firing and resolving without restarting the processor or
+  changing payment processing/acknowledgement behavior.
+- Provide reproducible startup, queries and cleanup; run the full Maven lifecycle
+  and the local collection exercise. Keep local evidence separate from CI.
+- M4 remains in progress; finish its bounded incident demonstration before M5.
+- Earlier objectives and criteria are preserved in [PASSATION.md](PASSATION.md).

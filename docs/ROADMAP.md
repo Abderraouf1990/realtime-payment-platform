@@ -14,19 +14,19 @@ Build practical expertise in AI engineering and demonstrate senior DevSecOps cap
 | M1 | Containerize API and processor | Completed locally and in CI | Image construction and Compose acceptance passed on GitHub for cca00ee: non-root, accepted payment, duplicate, durable rejection, Kafka event and down/up retention. See PROJECT_STATE.md. |
 | M2 | Secure image delivery | Completed for cca00ee | Authorized manual run 35661616528 passed all gates and published both images. Registry manifests/configs independently match the tested bundle, source SHA and non-root configuration. See PROJECT_STATE.md and docs/evidence/m2-publication.json. |
 | M3 | Local Kubernetes deployment | Completed locally | Isolated kind/Helm acceptance passed: M2 image digests, restricted non-root workloads, injected Secret, API/infra probes, payment outcomes, upgrade/rollback and PVC retention. Processor listener-health limitation is explicit in ADR 0009; no M3 CI claim. |
-| M4 | Observability and incident exercises | In progress | Listener health, structured processing logs, bounded attempt counters and HTTP/Kafka trace propagation implemented; see PROJECT_STATE.md for validation. Progress/lag metrics, collection, dashboards, alerting and other incidents remain open. |
+| M4 | Observability and incident exercises | In progress | Listener health, structured processing logs, bounded attempt counters, HTTP/Kafka traces and group progress/lag implemented; see PROJECT_STATE.md for validation. Collection, dashboards, alerting and other incidents remain open. |
 | M5 | Secure, evaluated incident assistant | Planned | RAG over versioned runbooks/ADRs; read-only incident evidence; sourced structured diagnosis and abstention; 15–20 evaluation cases including prompt injection; measure quality, latency and cost; authenticated access and redaction. |
 | M6 | Optional cloud demonstration | Deferred | Choose provider and budget explicitly; reproducible deployment and teardown; no cloud provisioning implied by this roadmap. |
 
 M1–M4 prepare the environment and evidence for M5. Keep these milestones bounded: AI must not be postponed indefinitely by additional payment features. Each milestone needs a reproducible demonstration, not a claim of production readiness.
 
-## Current task: M4, processor progress and consumer lag
+## Current task: M4, local collection and incident dashboard/alert
 
-Continue M4 with bounded processor progress/consumer-lag metrics and tests that
-distinguish idle consumption, backlog and a stopped listener. Preserve
-acknowledgement and manual recovery. Health, logs, attempt counters and HTTP/Kafka
-trace propagation are implemented; collection, dashboards, alerting and other
-incidents remain in M4. See PROJECT_STATE.md for the current validation evidence.
+Continue M4 with reproducible local collection, a minimal incident dashboard and
+a tested backlog/observation-unavailable alert. Use the existing health, attempts,
+traces and committed-offset progress/lag signals. Preserve acknowledgement and
+manual recovery; keep the demonstration bounded before M5. See PROJECT_STATE.md
+for the exact criteria and current validation evidence.
 Keep new payment features and cloud deployment out of scope.
 M2 publication was authorized only for cca00ee; further Git pushes and image
 publications still require the user's approval.
@@ -86,3 +86,9 @@ publications still require the user's approval.
   causal span checks, isolated contexts and export failure during manual replay.
   M4 remains in progress; continue with processor progress/consumer-lag metrics.
   The approved milestone order and publication authorization are unchanged.
+- 2026-09-25: Group progress/lag is locally validated on work based on `6130a81`:
+  117 Maven tests pass, including unassigned-group Kafka observation and seven
+  real-JAR E2E scenarios. Stopped-listener backlog grows and drains after manual
+  restart; unavailable broker observation is explicitly unknown. Continue M4
+  with bounded local collection and a tested incident dashboard/alert. No change
+  to milestone order, Git push or image publication authorization.

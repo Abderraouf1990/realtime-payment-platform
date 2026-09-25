@@ -18,10 +18,12 @@ The test uses Kafka 4.1.1, PostgreSQL 17.6 and actual application JARs. It verif
 2. PostgreSQL stops; HTTP intake still publishes an event to Kafka.
 3. Processing fails and the listener stops: listener/readiness return 503,
    `state=STOPPED`; liveness stays 200 and the processor JVM remains alive.
-4. The committed offset remains unchanged. PostgreSQL restarts; the failed payment
+4. The committed offset remains unchanged. Another HTTP intake increases lag
+   from 1 to 2 while the listener is stopped. PostgreSQL restarts; the failed payment
    has no row, the offset is still unchanged and the listener remains DOWN.
-5. Manual processor restart restores listener/readiness to 200, replays the event,
-   inserts one row and advances the offset. The original payment is unchanged.
+5. Manual processor restart restores listener/readiness to 200, drains both queued
+   events, inserts two rows and advances the offset. Lag returns to 0 and the
+   original payment is unchanged.
 
 Logs and the Failsafe report are under
 `payment-e2e-tests/target/failsafe-reports/`; application logs are in the directory
@@ -97,8 +99,12 @@ curl.exe -s 'http://127.0.0.1:8081/actuator/metrics/payments.processing.attempts
 For the automated scenario, before restart: accepted=1, technical_failure=1,
 duplicate=0, rejected=0. The original JVM remains alive so these can be inspected
 even while listener readiness is 503. After manual JVM restart and replay:
-accepted=1 and all other outcomes=0 in the new process; the ledger contains two
-rows. This difference demonstrates why counters cannot replace durable accounting.
+accepted=2 and all other outcomes=0 in the new process; the ledger contains three
+rows. The progress/lag extension adds a second queued payment while the listener
+is stopped: lag grows from 1 to 2, then returns to 0 after manual replay.
+This difference demonstrates why counters cannot replace durable accounting.
+See the [lag exercise](consumer-progress-and-lag.md) for the four cached gauges
+and how to distinguish idle consumption from unavailable observation.
 
 Filter the processor log by `event=payment.processing`, then transactionId or
 correlationId. Each record includes outcome, reasonCodes, partition and offset.

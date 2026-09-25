@@ -600,3 +600,83 @@ image publications or cloud provisioning.
   commit, push, run CI, scan/publication d'image, déploiement Kubernetes ou cloud.
   M2 reste validé pour `cca00ee` seulement ; M4 reste en cours. Prochaine tâche
   exacte : exposer et tester les métriques bornées de progression/lag du processor.
+
+## M4 — progression et lag du consommateur — 2026-09-25
+
+### Objectif et critères précédents conservés
+
+## Next Objective
+
+Continue M4: expose and verify bounded processor progress/consumer-lag metrics,
+then document how to distinguish an idle consumer, accumulating backlog and a
+stopped listener. Reuse the existing health/attempt/trace evidence and preserve
+manual recovery and acknowledgement ordering. Do not add payment features.
+
+## Acceptance Criteria for the Next Objective
+
+- Define lag and progress precisely, including their source, labels and behavior
+  before assignment, after restart and while the broker is unavailable.
+- Demonstrate backlog growth during a stopped/paused consumer and reduction after
+  manual recovery; an idle healthy consumer must not be classified as stalled.
+- Keep business identifiers, payload and credentials out of metric labels;
+  metric collection must not alter processing or offset commits.
+- Run the full Maven lifecycle, preserving health/log/trace/outage coverage, and
+  provide a reproducible local exercise. Record local results separately from CI.
+- M4 remains in progress; collection, dashboards, alerts and additional incident
+  exercises still precede M5. No new publication, push or cloud deployment is implied.
+- Previous objectives and criteria are preserved in [PASSATION.md](PASSATION.md).
+
+### Cohérence, réalisation et compromis
+
+- Départ propre à `6130a81`. Les traces ont été commitées à la demande de
+  l'utilisateur, sans push ; les mentions historiques « non commité » décrivent
+  la validation précédente. POM, contrats, contraintes SQL, ordre commit/ack,
+  configuration de tracing et images publiées concordent avec les documents.
+  Correction complémentaire : le README décrivait encore cinq E2E ; il en décrit
+  maintenant sept, avec les nouveaux scénarios traces et broker indisponible.
+- KafkaProgressSource utilise un Admin distinct et les paramètres de connexion
+  KafkaAdmin pour lire toutes les partitions du topic et les offsets du groupe.
+  ConsumerProgressMetrics publie quatre gauges sans labels à partir d'un cache.
+  Aucun appel réseau n'est réalisé par la lecture HTTP des gauges. L'intervalle
+  par défaut est 5 s, avec budget d'attente de 2 s pour une mesure ; les erreurs
+  invalident le lag sans modifier la consommation, les offsets ou la reprise.
+- Compromis : lire les offsets confirmés permet d'observer le backlog même après
+  l'arrêt du listener, au prix de requêtes périodiques et d'une vue approximative.
+  Ce lag est global au groupe et ne doit pas être additionné entre replicas.
+  Il mesure une distance d'offsets, pas des paiements uniques. Une progression
+  ancienne n'est pas une panne si le lag est nul ; une mesure indisponible vaut -1.
+- Exercice reproductible : [runbook progression/lag](runbooks/consumer-progress-and-lag.md).
+  Exécuter les scénarios ciblés ou lire les quatre gauges avec les commandes
+  fournies ; comparer idle, backlog pendant l'arrêt, reprise manuelle et panne
+  Kafka. ADR 0013 définit également absence d'assignation, rétention et resets.
+
+### Vérifications locales
+
+- Le premier test unitaire échouait lors du remplacement d'un mock configuré
+  pour lever une exception : `when(source.read())` réexécutait cette exception.
+  Utilisation de `doReturn` pour configurer la reprise ; aucun défaut métier ni
+  assouplissement d'assertion. Journal initial : `artifacts/m4-progress-unit.log`.
+- `.\mvnw.cmd -B -ntp -pl payment-e2e-tests -am '-Dit.test=PaymentFlowIT' '-Dfailsafe.failIfNoSpecifiedTests=false' verify`
+  réussit en 3:25 : les sept E2E passent, ainsi que les tests unitaires.
+  Journal : `artifacts/m4-progress-e2e.log`.
+- `.\mvnw.cmd -B -ntp clean verify` réussit en 5:29, terminé le 2026-09-25 à
+  11:36:12 +02:00, code de sortie 0. Recompte indépendant des rapports XML :
+  94 Surefire + 23 Failsafe = 117 tests, zéro échec, erreur ou ignoré.
+  Journal : `artifacts/m4-progress-verify.log` ; XML/logs/spans dans les
+  répertoires `target/*-reports`. Ce cycle inclut KafkaProgressSourceIT, ajouté
+  après le démarrage du lancement E2E ciblé.
+- Les sept tests unitaires vérifient les quatre gauges sans labels, sans appel
+  Kafka lors du scrape, puis agrégation, absence de commit, idle, progression,
+  erreurs/reprise, rétention, rewind et nouveau processus. L'intégration Kafka
+  vérifie deux partitions sans listener assigné et l'absence de commit par lecture.
+- Les vrais JARs démontrent idle sain à lag 0, vieillissement normal de progression,
+  lag 1 puis 2 pendant l'arrêt sur panne PostgreSQL, offset inchangé, puis lag 0
+  et trois lignes ledger après reprise manuelle. Le compteur du nouveau processus
+  compte les deux paiements repris. L'ancien paiement est inchangé.
+- Le nouveau scénario arrête Kafka : disponibilité de mesure 0, lag -1 et âge
+  croissant ; HTTP métriques/liveness restent accessibles. Toutes les garanties
+  précédentes de santé, logs, traces, panne d'export, idempotence et ack passent.
+- Travail local non commité basé sur `6130a81`, sans nouveau run CI, commit, push,
+  scan/publication d'image ou déploiement Kubernetes/cloud. Aucun blocage restant.
+  M4 reste en cours. Prochaine tâche : collecte locale reproductible avec dashboard
+  minimal et alerte testée sur backlog/observation indisponible.
