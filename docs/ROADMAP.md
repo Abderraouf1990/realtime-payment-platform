@@ -15,18 +15,24 @@ Build practical expertise in AI engineering and demonstrate senior DevSecOps cap
 | M2 | Secure image delivery | Completed for cca00ee | Authorized manual run 35661616528 passed all gates and published both images. Registry manifests/configs independently match the tested bundle, source SHA and non-root configuration. See PROJECT_STATE.md and docs/evidence/m2-publication.json. |
 | M3 | Local Kubernetes deployment | Completed locally | Isolated kind/Helm acceptance passed: M2 image digests, restricted non-root workloads, injected Secret, API/infra probes, payment outcomes, upgrade/rollback and PVC retention. Processor listener-health limitation is explicit in ADR 0009; no M3 CI claim. |
 | M4 | Observability and incident exercises | Completed local baseline | Health, logs, counters, traces and committed lag; pinned local Prometheus/Grafana, Viewer dashboard and tested alerts. 119 Maven tests, seven rule cases and isolated scrape-loss/SQL-outage/manual-recovery exercise pass. See PROJECT_STATE.md; no M4 CI or production claim. |
-| M5 | Secure, evaluated incident assistant | Planned | RAG over versioned runbooks/ADRs; read-only incident evidence; sourced structured diagnosis and abstention; 15–20 evaluation cases including prompt injection; measure quality, latency and cost; authenticated access and redaction. |
+| M5 | Secure, evaluated incident assistant | In progress | Offline read-only contract, response schema and 18 versioned development cases implemented. Runtime retrieval, access/redaction controls and model quality/latency/cost evaluation remain open; no assistant runtime claim. |
 | M6 | Optional cloud demonstration | Deferred | Choose provider and budget explicitly; reproducible deployment and teardown; no cloud provisioning implied by this roadmap. |
 
 M1–M4 prepare the environment and evidence for M5. Keep these milestones bounded: AI must not be postponed indefinitely by additional payment features. Each milestone needs a reproducible demonstration, not a claim of production readiness.
 
-## Current task: M5, read-only contract and evaluation corpus
+M5 acceptance remains: RAG over versioned runbooks/ADRs, read-only incident
+evidence, sourced structured diagnosis and abstention, 15–20 evaluation cases
+including prompt injection, measured quality/latency/cost, authenticated access
+and redaction. The offline contract alone does not complete this milestone.
 
-Start M5 with a versioned read-only incident-assistant contract and 18 evaluation
-cases grounded in current runbooks, ADRs and sanitized M4 evidence. Define sourced
-diagnosis, abstention, prompt-injection resistance, redaction and later quality,
-latency and cost measurement before integrating a model. See PROJECT_STATE.md
-for the exact criteria. Deterministic payment decisions and manual recovery stay unchanged.
+## Current task: M5, offline incident-context builder
+
+Implement the first offline context builder using the versioned contract and
+18-case corpus: principal/scope checks before evidence access, allowlisted
+redaction and bounded retrieval from hash-verified sources. Keep reference
+answers out of inference context. See PROJECT_STATE.md for exact criteria;
+model integration and evaluation follow this boundary. Deterministic payment
+decisions and manual recovery stay unchanged.
 Keep new payment features and cloud deployment out of scope.
 M2 publication was authorized only for cca00ee; further Git pushes and image
 publications still require the user's approval.
@@ -99,3 +105,9 @@ publications still require the user's approval.
   contract/evaluation corpus in the approved order. Central log/trace storage,
   production monitoring and external notifications are outside this local baseline.
   No new CI, push, cloud deployment or image publication is implied.
+- 2026-10-07: First M5 slice locally validated on work based on `22f4dee`:
+  read-only contract, hashed source manifest, closed response schema and 18
+  synthetic cases with scoring protocol. All 123 Maven tests pass, including
+  four artifact/negative-mutation tests. M5 remains in progress: next implement
+  the offline authorized/redacted context builder, then model integration and
+  measured evaluation. No priority change, provider call or CI claim.

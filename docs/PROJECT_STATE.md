@@ -13,11 +13,20 @@ L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
 | --- | --- |
 | TERMINÉ | M0 à M2 selon les [preuves datées](PASSATION.md#validated-state) ; M3 validé localement et commité dans `6c84939`. Cela ne constitue pas une validation CI de M3. |
 | TERMINÉ LOCALEMENT | M4 : santé, logs, traces, compteurs, lag, collecte, dashboard et alertes ; démonstration locale bornée validée, sans revendication CI ni production. |
-| À FAIRE | M5 : contrat en lecture seule et corpus de 18 cas d'évaluation de l'assistant. Critères exacts en fin de fichier. |
+| EN COURS | M5 : premier volet contrat/corpus terminé localement ; schéma fermé, 18 cas versionnés et 123 tests Maven réussis. Aucun modèle intégré ; M5 reste ouvert. |
+| À FAIRE | Construire le contexte d'incident hors ligne : contrôle du principal/périmètre, redaction et recherche bornée dans les sources approuvées. Critères exacts en fin de fichier. |
 | BLOQUÉ | Aucun blocage actuel démontré pour commencer M5. Une nouvelle publication, un push ou un déploiement cloud restent soumis à autorisation ; ce ne sont pas des prérequis au travail local. |
 | ABANDONNÉ | Aucun nouvel abandon observé. L'outbox et M6 restent différés, pas abandonnés. |
 
 ## Current Implementation
+
+- M5 begins with [ADR 0015](adr/0015-read-only-incident-assistant-contract.md) and
+  the [offline contract/corpus](assistant/v1/README.md): a closed response schema,
+  ten allowlisted hashed sources and 18 synthetic evaluation cases with reference
+  answers, citations and semantic scoring criteria. Four JUnit tests run in the
+  existing test module; no dependency or production application code was added.
+  Authentication, authorization, redaction and prompt-injection controls are
+  specified requirements, not implemented runtime protections. No model was run.
 
 - Maven application modules: `shared-contracts`, `transaction-api`, and `transaction-processor`.
   `payment-e2e-tests` runs the packaged applications in separate JVMs for black-box testing.
@@ -138,6 +147,20 @@ L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
 
 ## Validated State
 
+- M4 collection was subsequently committed as `22f4dee`, without push. Its local
+  results below describe validation before that commit; no M4 CI claim is added.
+- M5 contract/corpus focused validation (2026-10-07, work based on `22f4dee`):
+  four JUnit tests pass in 8.074 s. They check source hashes, 18 cases, references,
+  schema/semantic consistency and rejection of mutated invalid responses.
+  Log: `artifacts/m5-contract-focused.log`.
+- M5 full local validation: `.\mvnw.cmd -B -ntp clean verify` succeeds in 6:09,
+  ending 2026-10-07 at 21:34:38 +02:00, exit 0. XML recount: 123 tests (100
+  Surefire, 23 Failsafe including seven E2E), zero failures/errors/skips.
+  Log: `artifacts/m5-contract-verify-final.log`. Initial sandbox access denial
+  to Docker was resolved by the authorized rerun, without application changes.
+  `git diff --check` passes. This is uncommitted local work based on `22f4dee`,
+  not a CI or model evaluation result. No remaining blocker for the next task.
+
 - M4, collecte locale (2026-10-07, validation du travail basé sur `9aaceef`, avant
   son commit) : `.\mvnw.cmd -B -ntp clean verify` réussit en 7:28 à 16:32:44 +02:00.
   Recompte XML : 119 tests, soit 96 Surefire et 23 Failsafe dont sept E2E ;
@@ -239,6 +262,7 @@ Processing logs/counters follow [ADR 0011](adr/0011-processing-logs-and-attempt-
 HTTP/Kafka tracing follows [ADR 0012](adr/0012-http-kafka-tracing.md).
 Group progress/lag follows [ADR 0013](adr/0013-consumer-progress-and-lag.md).
 Local collection follows [ADR 0014](adr/0014-local-metrics-collection.md).
+The offline assistant contract follows [ADR 0015](adr/0015-read-only-incident-assistant-contract.md).
 
 - `Idempotency-Key` must equal the client-supplied `transactionId`; Kafka uses that
   ID as its record key. This does not guarantee ordering across an account.
@@ -278,6 +302,10 @@ Local collection follows [ADR 0014](adr/0014-local-metrics-collection.md).
 
 ## Current Gaps and Known Build Notes
 
+- M5 has no inference, retrieval service, executable access/redaction boundary or
+  runtime assistant yet. Corpus checks prove artifact consistency only. Model
+  quality, groundedness, latency, cost and security evaluation remain unmeasured.
+
 - No outbox: committed rejection audits and Kafka notifications are not atomic.
   Recovery depends on replay of retained input; publication can be repeated and the
   minimal notification contract does not identify each distinct rejected payload.
@@ -307,19 +335,23 @@ Local collection follows [ADR 0014](adr/0014-local-metrics-collection.md).
 
 ## Next Objective
 
-Start M5 with a versioned read-only incident-assistant contract and evaluation
-corpus: define the sourced diagnosis/abstention schema and 18 concrete cases
-using the current runbooks, ADRs and sanitized M4 evidence. Include prompt
-injection, unavailable/stale evidence and redaction cases before model integration.
+Implement the first offline incident-context builder: verify an injected trusted
+principal and incident scope, redact allowlisted evidence, and retrieve bounded
+excerpts only from the versioned source manifest. Return a traceable context
+bundle for later inference; no model/provider integration in this step.
 
 ## Acceptance Criteria for the Next Objective
 
-- Define allowed read-only evidence, prohibited payment/recovery actions, required
-  source references, uncertainty/abstention behavior and authenticated access needs.
-- Version 18 cases with inputs, expected diagnosis or abstention, source references
-  and scoring criteria; include prompt injection and sensitive-data handling.
-- Validate dataset/schema consistency with reproducible tests. Define how later
-  model runs will measure quality, groundedness, latency and cost.
-- Keep deterministic payment decisions and manual recovery unchanged. Do not
-  provision cloud resources, publish images or send data to a model provider.
+- Deny missing identity or unauthorized scope before reading evidence or sources;
+  test zero adapter calls on denial. Identity cannot come from request text.
+- Accept only allowed snapshot fields, replace sensitive correlations with local
+  aliases, and reject raw payloads, credentials and unsupported fields before
+  producing context. Test the corpus canaries and adversarial text.
+- Verify source hashes and path boundaries, return bounded excerpts with source
+  IDs and evidence provenance, and fail closed on tampering or unknown references.
+- Demonstrate deterministic offline retrieval on the 18-case corpus; keep expected
+  answers and scoring rubrics out of the context. Report retrieval coverage and
+  limits without claiming model quality or implemented production authentication.
+- Run focused boundary tests and the full Maven lifecycle. Preserve payment
+  decisions, acknowledgement and manual recovery; no provider calls or cloud work.
 - Earlier objectives and criteria are preserved in [PASSATION.md](PASSATION.md).

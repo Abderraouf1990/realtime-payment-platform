@@ -1,0 +1,110 @@
+{
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "string",
+      "enum": [
+        "1"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "diagnosed",
+        "abstained",
+        "denied"
+      ]
+    },
+    "diagnosis": {
+      "type": "string",
+      "enum": [
+        "idle",
+        "stopped_backlog",
+        "recovered",
+        "observation_unavailable",
+        "counter_reset",
+        "attempt_not_commit",
+        "replay_possible",
+        "trace_incomplete",
+        "unknown"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "claim": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "evidenceIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            },
+            "minItems": 1
+          },
+          "sourceIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "claim",
+          "evidenceIds",
+          "sourceIds"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 0
+    },
+    "uncertainty": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 2000
+      },
+      "minItems": 1
+    },
+    "nextChecks": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 2000
+      },
+      "minItems": 0
+    },
+    "abstentionReason": {
+      "type": "string",
+      "minLength": 0,
+      "maxLength": 2000
+    }
+  },
+  "required": [
+    "version",
+    "status",
+    "diagnosis",
+    "summary",
+    "findings",
+    "uncertainty",
+    "nextChecks",
+    "abstentionReason"
+  ],
+  "additionalProperties": false
+}

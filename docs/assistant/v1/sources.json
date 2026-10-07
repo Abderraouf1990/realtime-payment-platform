@@ -1,0 +1,56 @@
+{
+  "version": "1",
+  "normalization": "UTF-8; CRLF to LF",
+  "sources": [
+    {
+      "id": "health",
+      "path": "docs/adr/0010-processor-listener-health.md",
+      "sha256": "41a34e95285e45aea3b477696fa6cf688f798aaf03757f3413acf4043d76f8be"
+    },
+    {
+      "id": "attempts",
+      "path": "docs/adr/0011-processing-logs-and-attempt-metrics.md",
+      "sha256": "4ee44731b133c1bb50bfb19a78d88fac1c256566bf64700b30c6713ba78707a4"
+    },
+    {
+      "id": "traces",
+      "path": "docs/adr/0012-http-kafka-tracing.md",
+      "sha256": "612b5bdae948bd2446ec03e5264a3373dd383d3d436afc28ed81d8dc549ee6ed"
+    },
+    {
+      "id": "lag",
+      "path": "docs/adr/0013-consumer-progress-and-lag.md",
+      "sha256": "9ad3b7fe0c235e2783284981e459753cd3a87783db41baca04075149eacbc7c0"
+    },
+    {
+      "id": "collection",
+      "path": "docs/adr/0014-local-metrics-collection.md",
+      "sha256": "a528b3422fe5a4631c006cb97c1ff5696aeb2ec8032396f53b567cdcfa1a5787"
+    },
+    {
+      "id": "rejection",
+      "path": "docs/adr/0006-rejection-notifications.md",
+      "sha256": "96626b924ca50de344f6d25091feca36e750befc36182bdbdf39da6d293df8e2"
+    },
+    {
+      "id": "sql-runbook",
+      "path": "docs/runbooks/processor-postgresql-outage.md",
+      "sha256": "54323e76ab714141a6f162bd7f67b0d88f11ffb89569af1b1ff316478d0fc32e"
+    },
+    {
+      "id": "lag-runbook",
+      "path": "docs/runbooks/consumer-progress-and-lag.md",
+      "sha256": "59a159972c8fe0b5eb2a329529a5ee84753ac768b37b1ddd56717034db5ef7d9"
+    },
+    {
+      "id": "collection-runbook",
+      "path": "docs/runbooks/local-observability.md",
+      "sha256": "1f8e3512907134a71d11fd3d0dc521013ad9a885ddc682ecd8ffc927075a096a"
+    },
+    {
+      "id": "policy",
+      "path": "docs/adr/0015-read-only-incident-assistant-contract.md",
+      "sha256": "526c7f9d3d0a7b83adb4218db2182b09a41400b40a82def196dcf8d91ec2fba5"
+    }
+  ]
+}

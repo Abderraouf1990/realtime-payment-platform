@@ -625,6 +625,15 @@ cleanup, or add `-Keep` to inspect it afterwards. See the
 [ADR 0014](docs/adr/0014-local-metrics-collection.md). Alerts do not trigger recovery
 or send notifications; application logs/traces remain separate evidence.
 
+## Incident assistant contract (M5, offline first slice)
+
+The [v1 contract and evaluation corpus](docs/assistant/v1/README.md) define
+read-only diagnosis, sourced findings, abstention, access/redaction requirements
+and 18 synthetic development cases. Maven checks their schema, references and
+source hashes. No model or assistant server is integrated yet; these checks do
+not establish runtime security or model quality. See
+[ADR 0015](docs/adr/0015-read-only-incident-assistant-contract.md).
+
 ## Secure image delivery (M2)
 
 CI now prepares tested, commit-labelled application images, CodeQL Java

@@ -754,3 +754,80 @@ before M5; no new payment feature, cloud provisioning or image publication.
   and the local collection exercise. Keep local evidence separate from CI.
 - M4 remains in progress; finish its bounded incident demonstration before M5.
 - Earlier objectives and criteria are preserved in [PASSATION.md](PASSATION.md).
+
+## M5 - offline contract and evaluation corpus - 2026-10-07
+
+### Réalisation, limites et exercice
+
+- Départ propre à `22f4dee`, qui contient la collecte M4 validée précédemment.
+  Les anciens résultats « avant commit » restent conservés et sont maintenant
+  reliés à ce commit dans PROJECT_STATE.md. L'ordre des jalons ne change pas.
+- ADR 0015 fixe la lecture seule, les preuves admises, l'authentification et le
+  contrôle du périmètre avant tout accès, la redaction avant transmission,
+  l'abstention, les citations et l'interdiction de décisions/actions de paiement.
+  Ces règles sont spécifiées ; aucune protection applicative M5 n'est encore exécutée.
+- `docs/assistant/v1` contient un schéma de réponse fermé, dix sources avec
+  empreintes SHA-256 normalisées LF et 18 cas synthétiques. Chaque cas comporte
+  question, preuve, contexte de confiance simulé, réponse de référence et critères
+  sémantiques requis/interdits. Les cas couvrent idle, backlog/reprise, observation
+  inconnue/périmée, resets, ack, replay, traces, contradictions, injections,
+  divulgation de données, accès refusé et actions hors périmètre.
+- Les données sont des fixtures synthétiques fondées sur les ADR/runbooks et les
+  sémantiques démontrées en M4 ; elles ne prétendent pas être des captures réelles.
+  Les canaris de secrets sont fictifs. Le corpus ne doit pas être transmis tel
+  quel à un fournisseur : une future frontière de redaction reste à implémenter.
+- Compromis : contrat et évaluation inspectables sans coût fournisseur ni nouvelle
+  dépendance, mais aucun résultat de modèle ou de sécurité en exécution. Le petit
+  validateur de tests accepte seulement les mots-clés employés, rejette les autres
+  et ne constitue pas un moteur JSON Schema général ni un filtre de production.
+- Le protocole futur distingue gates déterministes, notation sémantique humaine,
+  groundedness, abstention et qualité des références ; trois répétitions par cas,
+  latence p50/p95, tokens/coûts selon tarifs datés et budgets avant activation.
+  Les réponses attendues seront exclues des entrées du modèle. Un jeu indépendant
+  sera nécessaire avant toute revendication de généralisation.
+- Exercice reproductible : voir `docs/assistant/v1/README.md`. Comparer C01/C05
+  et C02/C03, puis remplacer temporairement une citation par un ID inexistant :
+  le test ciblé doit échouer. Restaurer le fichier avant de poursuivre.
+
+### Validation locale
+
+- La commande ciblée documentée passe : quatre tests JUnit en 8.074 s, zéro
+  échec/erreur/ignoré, le 2026-10-07 à 21:26:58 +02:00. Les tests vérifient aussi
+  des mutations invalides (champ d'action ajouté, mauvais type, citation inventée,
+  preuve absente, diagnostic non autorisé, fausse abstention).
+  Journal : `artifacts/m5-contract-focused.log`.
+- Le premier cycle complet échoue à cause du bac à sable : accès refusé à
+  `\\.\pipe\docker_engine`, avant les tests Kafka. Aucun correctif applicatif
+  nécessaire ; relance avec accès Docker autorisé. Journal initial :
+  `artifacts/m5-contract-verify.log`.
+- La relance `.\mvnw.cmd -B -ntp clean verify` réussit en 6:09 à 21:34:38 +02:00,
+  code 0. Recompte XML : 100 Surefire + 23 Failsafe = 123 tests, dont sept E2E,
+  zéro échec, erreur ou ignoré. Journal : `artifacts/m5-contract-verify-final.log`.
+  `git diff --check` passe. Les critères du premier volet contrat/corpus sont
+  satisfaits ; aucun blocage restant démontré. Ce travail est non commité et
+  aucune preuve CI de M2/M4 n'est étendue à ce nouveau volet.
+- Travail local basé sur `22f4dee`, sans fournisseur de modèle, push, publication,
+  nouveau run CI ni changement de code métier ou de politique commit/ack.
+  M5 reste en cours ; la prochaine tâche est la construction hors ligne du
+  contexte avec contrôle de périmètre, redaction et recherche bornée.
+
+### Previous objective and criteria (preserved)
+
+## Next Objective
+
+Start M5 with a versioned read-only incident-assistant contract and evaluation
+corpus: define the sourced diagnosis/abstention schema and 18 concrete cases
+using the current runbooks, ADRs and sanitized M4 evidence. Include prompt
+injection, unavailable/stale evidence and redaction cases before model integration.
+
+## Acceptance Criteria for the Next Objective
+
+- Define allowed read-only evidence, prohibited payment/recovery actions, required
+  source references, uncertainty/abstention behavior and authenticated access needs.
+- Version 18 cases with inputs, expected diagnosis or abstention, source references
+  and scoring criteria; include prompt injection and sensitive-data handling.
+- Validate dataset/schema consistency with reproducible tests. Define how later
+  model runs will measure quality, groundedness, latency and cost.
+- Keep deterministic payment decisions and manual recovery unchanged. Do not
+  provision cloud resources, publish images or send data to a model provider.
+- Earlier objectives and criteria are preserved in [PASSATION.md](PASSATION.md).
