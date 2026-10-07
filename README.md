@@ -477,7 +477,8 @@ Spring Boot manages JUnit Jupiter 6.0.3, as required by Spring Framework 7.
 
 Rejection audit integration tests include V1-to-V2 migration, null/decimal preservation,
 idempotence and a rejection COMMIT failure with no premature Kafka acknowledgement.
-Automated recovery, audit access control and operational dashboards remain future work.
+Automated recovery and audit access control remain future work. The M4 section
+below describes the local incident dashboard and its operational limits.
 
 ## Local Kubernetes (M3)
 
@@ -615,8 +616,14 @@ Actuator reads cached values. Unavailable lag is -1, not zero. See
 [lag exercise](docs/runbooks/consumer-progress-and-lag.md) for idle/backlog,
 broker outage, reset and replica semantics.
 
-M4 remains in progress: collection, alerting,
-dashboards and the remaining incident exercises are still pending.
+For local collection, the opt-in `observability` profile exposes an allowlisted
+Prometheus endpoint. `docker-compose.observability.yml` adds digest-pinned
+Prometheus/Grafana, a provisioned Viewer dashboard and tested local alert rules.
+Run `.\scripts\verify-observability.ps1` for an isolated exercise with automatic
+cleanup, or add `-Keep` to inspect it afterwards. See the
+[collection runbook](docs/runbooks/local-observability.md) and
+[ADR 0014](docs/adr/0014-local-metrics-collection.md). Alerts do not trigger recovery
+or send notifications; application logs/traces remain separate evidence.
 
 ## Secure image delivery (M2)
 

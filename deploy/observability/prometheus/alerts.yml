@@ -1,0 +1,32 @@
+groups:
+  - name: payment-incident
+    rules:
+      - alert: PaymentBacklog
+        expr: >-
+          (payments_consumer_lag{job="payment-processor"} > 0)
+          and on(job, instance) (payments_consumer_observation_available == 1)
+          and on(job, instance) (payments_consumer_observation_age_seconds >= 0)
+          and on(job, instance) (payments_consumer_observation_age_seconds <= 15)
+          and on(job, instance) (up == 1)
+        for: 15s
+        labels:
+          severity: warning
+        annotations:
+          summary: Uncommitted payment backlog persists
+          action: Inspect listener health, attempts and logs; recovery is manual.
+      - alert: PaymentObservationUnavailable
+        expr: >-
+          (up{job="payment-processor"} == 0)
+          or (payments_consumer_observation_available{job="payment-processor"} == 0)
+          or (payments_consumer_observation_age_seconds{job="payment-processor"} > 15)
+          or (payments_consumer_observation_age_seconds{job="payment-processor"} < 0)
+          or absent(up{job="payment-processor"})
+          or ((up{job="payment-processor"} == 1) unless on(job, instance) payments_consumer_observation_available)
+          or ((up{job="payment-processor"} == 1) unless on(job, instance) payments_consumer_observation_age_seconds)
+          or ((up{job="payment-processor"} == 1) unless on(job, instance) payments_consumer_lag)
+        for: 15s
+        labels:
+          severity: warning
+        annotations:
+          summary: Payment observation is unavailable or stale
+          action: Check scrape target and Kafka observation; unknown lag is not zero.

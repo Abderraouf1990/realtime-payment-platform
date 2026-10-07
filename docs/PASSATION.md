@@ -1,6 +1,6 @@
 # Passation — historique et preuves
 
-Updated: 2026-09-25
+Updated: 2026-10-07
 
 ## Rôle de ce document
 
@@ -680,3 +680,77 @@ manual recovery and acknowledgement ordering. Do not add payment features.
   scan/publication d'image ou déploiement Kubernetes/cloud. Aucun blocage restant.
   M4 reste en cours. Prochaine tâche : collecte locale reproductible avec dashboard
   minimal et alerte testée sur backlog/observation indisponible.
+
+## M4 - local metrics collection - 2026-10-07
+
+### Cohérence, réalisation et compromis
+
+- Départ propre à `9aaceef` : les documents décrivaient correctement les signaux
+  présents, mais leur validation historique « non commitée » devait être reliée
+  aux commits `6130a81` et `9aaceef`. Les contrats, contraintes SQL, ports et ordre
+  commit/ack restent inchangés. AGENTS.md concorde avec le build et les modules.
+- Le profil `observability` exporte neuf séries autorisées. L'overlay Compose
+  ajoute Prometheus et Grafana épinglés par digest, un dashboard Viewer provisionné
+  et deux alertes locales. Aucun identifiant métier ni payload n'est un label.
+- Compromis : provisionnement simple et stockage temporaire pour une démonstration
+  reproductible, au prix d'un historique perdu au redémarrage du monitoring.
+  Les logs/traces restent des preuves séparées ; ni notification externe,
+  authentification de production ni reprise automatique ne sont revendiquées.
+- Exercice : exécuter `.\scripts\verify-observability.ps1`, ou ajouter `-Keep`
+  pour lire le dashboard et les cinq snapshots. Comparer idle, perte de collecte,
+  restauration, backlog SQL et drainage manuel. Nettoyage et interprétation :
+  [runbook](runbooks/local-observability.md), [ADR 0014](adr/0014-local-metrics-collection.md).
+
+### Vérifications et corrections
+
+- Le cycle Maven final `.\mvnw.cmd -B -ntp clean verify` réussit en 7:28,
+  terminé le 2026-10-07 à 16:32:44 +02:00. Recompte XML : 96 Surefire et
+  23 Failsafe, soit 119 tests dont sept E2E, zéro échec, erreur ou ignoré.
+  Journal : `artifacts/m4-collection-verify-final.log`.
+- Le premier cycle a révélé une lecture concurrente d'un caractère UTF-8 incomplet
+  en fin de log. Le lecteur E2E ne décode désormais que les lignes terminées ;
+  aucune assertion métier n'est assouplie. Le cycle complet ci-dessus valide ce correctif.
+- Promtool nécessite un `/tmp` inscriptible : ajout d'un tmpfs avec UID non-root.
+  Sept cas de règles couvrent idle, backlog, observation absente/périmée/inconnue,
+  unicité de l'alerte et resets. Une règle `absent` produisait une seconde alerte
+  sans instance lors d'une perte de scrape ; les séries manquantes sont désormais
+  détectées par cible avec `unless`.
+- Une première démonstration complète a réussi (`payments-observe-4722886a9b`),
+  puis la relance a révélé que Docker pouvait publier le port Prometheus via le
+  réseau déconnecté. La priorité de passerelle est maintenant donnée au réseau
+  monitoring, qui reste connecté. Compose 2.33.1+ est requis et documenté.
+- Les validations sont locales, sur le travail basé sur `9aaceef`. Aucun nouveau
+  run CI, scan de livraison, publication d'image, push ou déploiement cloud.
+  Les preuves CI/publiées de M2 restent propres à `cca00ee`.
+- Validation finale : `.\scripts\verify-observability.ps1`, projet
+  `payments-observe-d24f888fa9`, code 0. Résultat PASS à 20:27:38 +02:00 :
+  dashboard/datasource, neuf séries, idle sans alerte, une alerte de collecte
+  résolue sans redémarrage ni changement d'offset, backlog 1 puis 2, restauration
+  SQL sans reprise implicite, drainage après redémarrage manuel, trois lignes
+  ledger, offsets avancés de deux et reset observé. Nettoyage terminé.
+  Preuves : `artifacts/m4-collection-compose-final.log` et les cinq snapshots
+  dans `artifacts/payments-observe-d24f888fa9/` ; ces artefacts locaux sont ignorés
+  par Git. M4 est terminé pour la démonstration locale bornée. Prochaine tâche :
+  contrat M5 en lecture seule et 18 cas d'évaluation, avant intégration d'un modèle.
+
+### Previous objective and acceptance criteria (preserved)
+
+## Next Objective
+
+Continue M4: add reproducible local metrics collection with a minimal dashboard
+and a tested backlog/observation-unavailable alert, using the existing listener,
+attempt and committed-lag signals. Keep this bounded to the incident demonstration
+before M5; no new payment feature, cloud provisioning or image publication.
+
+## Acceptance Criteria for the Next Objective
+
+- Pin collector/dashboard images and keep access local; expose only the metrics
+  necessary for the exercise, without payloads, credentials or business-ID labels.
+- Show healthy idle consumption, stopped-listener backlog, manual drain and lost
+  observations, accounting for sampling freshness and JVM counter resets.
+- Demonstrate an alert firing and resolving without restarting the processor or
+  changing payment processing/acknowledgement behavior.
+- Provide reproducible startup, queries and cleanup; run the full Maven lifecycle
+  and the local collection exercise. Keep local evidence separate from CI.
+- M4 remains in progress; finish its bounded incident demonstration before M5.
+- Earlier objectives and criteria are preserved in [PASSATION.md](PASSATION.md).

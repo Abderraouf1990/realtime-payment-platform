@@ -106,6 +106,13 @@ class PaymentFlowIT {
         }
         assertAttempts(processor, 1, 0, 0, 0);
         assertProcessingLog(processor, "TX-E2E", "CORR-E2E", "accepted", List.of());
+        var scrape = healthRequest(processor, "/actuator/prometheus");
+        assertThat(scrape.statusCode()).isEqualTo(200);
+        var samples = scrape.body().lines().filter(l -> !l.isBlank() && !l.startsWith("#")).toList();
+        assertThat(samples).hasSize(9).allSatisfy(line -> assertThat(line).matches(
+                "payments_(consumer_(lag|observation_available|observation_age_seconds|progress_age_seconds|listener_running)"
+                        + "|processing_attempts_total\\{outcome=\"(accepted|duplicate|rejected|technical_failure)\"\\}) [-0-9.E]+"));
+        assertThat(scrape.body()).doesNotContain("ACC-E2E", "TX-E2E", "CORR-E2E", "traceId", "jdbc", "password");
     }
 
     @Test
@@ -296,7 +303,7 @@ class PaymentFlowIT {
 
     private tools.jackson.databind.JsonNode processingLog(RunningApp app, String id, String outcome) throws Exception {
         var mapper = JsonMapper.builder().build();
-        return Files.readAllLines(app.log()).stream().filter(l -> l.startsWith("{"))
+        return completeLog(app.log()).lines().filter(l -> l.startsWith("{"))
                 .map(mapper::readTree).filter(j -> j.path("event").asString().equals("payment.processing")
                         && j.path("transactionId").asString().equals(id) && j.path("outcome").asString().equals(outcome))
                 .findFirst().orElseThrow();
@@ -340,7 +347,7 @@ class PaymentFlowIT {
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
             var mapper = JsonMapper.builder().build();
             var matches = new ArrayList<tools.jackson.databind.JsonNode>();
-            for (var line : Files.readAllLines(app.log())) {
+            for (var line : completeLog(app.log()).lines().toList()) {
                 if (!line.startsWith("{")) continue; // JVM diagnostics need not be JSON.
                 var json = mapper.readTree(line);
                 if (json.has("event") && json.get("event").asString().equals("payment.processing")
@@ -395,6 +402,7 @@ class PaymentFlowIT {
     private RunningApp launchProcessor(String log, KafkaContainer kafka, PostgreSQLContainer postgres) throws Exception {
         return launch("transaction-processor", log, kafka, List.of(
                 "--server.port=0",
+                "--spring.profiles.active=observability",
                 "--payments.monitoring.interval=500",
                 "--spring.datasource.url=" + jdbcUrl(postgres),
                 "--spring.datasource.username=" + postgres.getUsername(),
@@ -495,16 +503,25 @@ class PaymentFlowIT {
         }
     }
 
+    // A running JVM may be halfway through a UTF-8 character or JSON event at EOF.
+    // Only decode complete newline-terminated log records, then retry the next poll.
+    private static String completeLog(Path path) throws java.io.IOException {
+        byte[] bytes = Files.readAllBytes(path);
+        int end = bytes.length;
+        while (end > 0 && bytes[end - 1] != '\n') end--;
+        return new String(bytes, 0, end, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
     private record RunningApp(Process process, Path log) implements AutoCloseable {
         void awaitLog(String text) {
             await().atMost(Duration.ofSeconds(60)).untilAsserted(() -> {
-                assertThat(Files.readString(log)).contains(text);
+                assertThat(completeLog(log)).contains(text);
             });
         }
 
         int httpPort() throws Exception {
             awaitLog("Tomcat started on port");
-            var match = Pattern.compile("Tomcat started on port (\\d+)").matcher(Files.readString(log));
+            var match = Pattern.compile("Tomcat started on port (\\d+)").matcher(completeLog(log));
             assertThat(match.find()).as("HTTP port in %s", log).isTrue();
             return Integer.parseInt(match.group(1));
         }

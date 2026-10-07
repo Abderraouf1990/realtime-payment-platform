@@ -1,0 +1,10 @@
+apiVersion: 1
+providers:
+  - name: payments
+    orgId: 1
+    folder: Payments
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/dashboards

@@ -1,0 +1,125 @@
+rule_files: [alerts.yml]
+evaluation_interval: 5s
+tests:
+  - name: Idle is healthy even with old progress; backlog fires then resolves
+    interval: 5s
+    input_series:
+      - series: 'up{job="payment-processor",instance="processor"}'
+        values: '1x12'
+      - series: 'payments_consumer_lag{job="payment-processor",instance="processor"}'
+        values: '0 0 0 2 2 2 2 2 0 0 0 0 0'
+      - series: 'payments_consumer_observation_available{job="payment-processor",instance="processor"}'
+        values: '1x12'
+      - series: 'payments_consumer_observation_age_seconds{job="payment-processor",instance="processor"}'
+        values: '2x12'
+      - series: 'payments_consumer_progress_age_seconds{job="payment-processor",instance="processor"}'
+        values: '999x12'
+    alert_rule_test:
+      - eval_time: 10s
+        alertname: PaymentBacklog
+        exp_alerts: []
+      - eval_time: 30s
+        alertname: PaymentBacklog
+        exp_alerts:
+          - exp_labels: {job: payment-processor, instance: processor, severity: warning}
+            exp_annotations:
+              summary: Uncommitted payment backlog persists
+              action: Inspect listener health, attempts and logs; recovery is manual.
+      - eval_time: 45s
+        alertname: PaymentBacklog
+        exp_alerts: []
+      - eval_time: 45s
+        alertname: PaymentObservationUnavailable
+        exp_alerts: []
+  - name: Unavailable Kafka observation is not zero backlog
+    interval: 5s
+    input_series:
+      - series: 'up{job="payment-processor",instance="processor"}'
+        values: '1x6'
+      - series: 'payments_consumer_lag{job="payment-processor",instance="processor"}'
+        values: '-1x6'
+      - series: 'payments_consumer_observation_available{job="payment-processor",instance="processor"}'
+        values: '0x6'
+      - series: 'payments_consumer_observation_age_seconds{job="payment-processor",instance="processor"}'
+        values: '20x6'
+    alert_rule_test:
+      - eval_time: 20s
+        alertname: PaymentBacklog
+        exp_alerts: []
+      - eval_time: 20s
+        alertname: PaymentObservationUnavailable
+        exp_alerts:
+          - exp_labels: {job: payment-processor, instance: processor, severity: warning}
+            exp_annotations:
+              summary: Payment observation is unavailable or stale
+              action: Check scrape target and Kafka observation; unknown lag is not zero.
+  - name: Stale observation masks an old positive lag
+    interval: 5s
+    input_series:
+      - series: 'up{job="payment-processor",instance="processor"}'
+        values: '1x6'
+      - series: 'payments_consumer_lag{job="payment-processor",instance="processor"}'
+        values: '5x6'
+      - series: 'payments_consumer_observation_available{job="payment-processor",instance="processor"}'
+        values: '1x6'
+      - series: 'payments_consumer_observation_age_seconds{job="payment-processor",instance="processor"}'
+        values: '20x6'
+    alert_rule_test:
+      - eval_time: 20s
+        alertname: PaymentBacklog
+        exp_alerts: []
+      - eval_time: 20s
+        alertname: PaymentObservationUnavailable
+        exp_alerts:
+          - exp_labels: {job: payment-processor, instance: processor, severity: warning}
+            exp_annotations:
+              summary: Payment observation is unavailable or stale
+              action: Check scrape target and Kafka observation; unknown lag is not zero.
+  - name: Missing target or all metrics cannot silently look healthy
+    interval: 5s
+    input_series: []
+    alert_rule_test:
+      - eval_time: 20s
+        alertname: PaymentObservationUnavailable
+        exp_alerts:
+          - exp_labels: {job: payment-processor, severity: warning}
+            exp_annotations:
+              summary: Payment observation is unavailable or stale
+              action: Check scrape target and Kafka observation; unknown lag is not zero.
+  - name: Failed scrape emits only one alert per target even when payment series disappear
+    interval: 5s
+    input_series:
+      - series: 'up{job="payment-processor",instance="processor"}'
+        values: '0x6'
+    alert_rule_test:
+      - eval_time: 20s
+        alertname: PaymentObservationUnavailable
+        exp_alerts:
+          - exp_labels: {job: payment-processor, instance: processor, severity: warning}
+            exp_annotations:
+              summary: Payment observation is unavailable or stale
+              action: Check scrape target and Kafka observation; unknown lag is not zero.
+  - name: Successful scrape with missing required signals is also unavailable
+    interval: 5s
+    input_series:
+      - series: 'up{job="payment-processor",instance="processor"}'
+        values: '1x6'
+    alert_rule_test:
+      - eval_time: 20s
+        alertname: PaymentObservationUnavailable
+        exp_alerts:
+          - exp_labels: {job: payment-processor, instance: processor, severity: warning}
+            exp_annotations:
+              summary: Payment observation is unavailable or stale
+              action: Check scrape target and Kafka observation; unknown lag is not zero.
+  - name: Counter restart uses rate before aggregation
+    interval: 5s
+    input_series:
+      - series: 'payments_processing_attempts_total{job="payment-processor",instance="processor",outcome="accepted"}'
+        values: '0 1 2 0 1 2 3'
+    promql_expr_test:
+      - expr: 'sum by(outcome) (rate(payments_processing_attempts_total{job="payment-processor"}[30s])) >= bool 0'
+        eval_time: 30s
+        exp_samples:
+          - labels: '{outcome="accepted"}'
+            value: 1

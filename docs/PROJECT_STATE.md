@@ -1,6 +1,6 @@
 # Project State
 
-Updated: 2026-09-25
+Updated: 2026-10-07
 
 ## Objectif principal et statuts actuels
 
@@ -9,12 +9,12 @@ DevSecOps senior avec une plateforme de paiement déployable et un assistant
 d'incident sécurisé et évalué. Les décisions de paiement restent déterministes.
 L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
 
-| Statut | Situation au 2026-09-25 |
+| Statut | Situation au 2026-10-07 |
 | --- | --- |
 | TERMINÉ | M0 à M2 selon les [preuves datées](PASSATION.md#validated-state) ; M3 validé localement et commité dans `6c84939`. Cela ne constitue pas une validation CI de M3. |
-| EN COURS | M4 : santé, logs, compteurs et traces commités (`6130a81`) ; progression/lag validés localement sur le travail non commité basé sur cette révision (117 tests). Les autres travaux d'observabilité restent ouverts. |
-| À FAIRE | M4 : collecte, alertes, dashboards et autres incidents ; M5 : assistant d'incident. Les critères de la prochaine tâche restent en fin de fichier. |
-| BLOQUÉ | Aucun blocage actuel démontré pour poursuivre M4. Une nouvelle publication, un push ou un déploiement cloud restent soumis à autorisation ; ce ne sont pas des prérequis au travail local. |
+| TERMINÉ LOCALEMENT | M4 : santé, logs, traces, compteurs, lag, collecte, dashboard et alertes ; démonstration locale bornée validée, sans revendication CI ni production. |
+| À FAIRE | M5 : contrat en lecture seule et corpus de 18 cas d'évaluation de l'assistant. Critères exacts en fin de fichier. |
+| BLOQUÉ | Aucun blocage actuel démontré pour commencer M5. Une nouvelle publication, un push ou un déploiement cloud restent soumis à autorisation ; ce ne sont pas des prérequis au travail local. |
 | ABANDONNÉ | Aucun nouvel abandon observé. L'outbox et M6 restent différés, pas abandonnés. |
 
 ## Current Implementation
@@ -125,7 +125,35 @@ L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
   progress but reads durable offsets. See [ADR 0013](adr/0013-consumer-progress-and-lag.md)
   and the [lag exercise](runbooks/consumer-progress-and-lag.md).
 
+- The processor's opt-in `observability` profile exports an exact six-meter
+  allowlist (nine series) via Prometheus, adding a listener-running gauge derived
+  from existing health. Default startup keeps Prometheus disabled. The Compose
+  overlay adds digest-pinned Prometheus/Grafana with loopback ports, non-root
+  read-only containers and disposable monitoring data. File provisioning defines
+  a Viewer-only dashboard, datasource and backlog/unknown-observation rules.
+  Seven promtool cases cover idle, firing/resolution, stale/missing/unknown samples
+  and counter resets. No notifications or automatic recovery are configured.
+  See [ADR 0014](adr/0014-local-metrics-collection.md) and the
+  [local exercise](runbooks/local-observability.md).
+
 ## Validated State
+
+- M4, collecte locale (2026-10-07, validation du travail basé sur `9aaceef`, avant
+  son commit) : `.\mvnw.cmd -B -ntp clean verify` réussit en 7:28 à 16:32:44 +02:00.
+  Recompte XML : 119 tests, soit 96 Surefire et 23 Failsafe dont sept E2E ;
+  aucun échec, erreur ou ignoré. Les E2E vérifient aussi les neuf séries HTTP autorisées.
+- `.\scripts\verify-observability.ps1` réussit avec code 0 sur le projet isolé
+  `payments-observe-d24f888fa9` : sept cas promtool, dashboard Viewer/datasource,
+  idle sans alerte, une seule alerte de perte de collecte puis résolution sans
+  redémarrage ni changement d'offset, backlog 1 puis 2 sur panne SQL, reprise
+  manuelle, lag 0, trois lignes ledger et reset des compteurs. Résultat enregistré
+  à 20:27:38 +02:00 ; conteneurs, réseaux et volumes de l'exercice supprimés.
+  Journaux : `artifacts/m4-collection-verify-final.log`,
+  `artifacts/m4-collection-compose-final.log` et cinq snapshots sous
+  `artifacts/payments-observe-d24f888fa9/`. Compromis et corrections :
+  [PASSATION.md](PASSATION.md), [ADR 0014](adr/0014-local-metrics-collection.md).
+  Aucun nouveau run CI, scan/publication d'image ou déploiement Kubernetes/cloud.
+  M4 satisfait sa démonstration locale bornée ; M5 peut commencer.
 
 - M4, progression/lag (2026-09-25, travail non commité basé sur `6130a81`) :
   `.\mvnw.cmd -B -ntp clean verify` réussit en 5:29, terminé à 11:36:12 +02:00,
@@ -141,6 +169,8 @@ L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
   d'image ou déploiement M4 pour ce volet ; les preuves CI de M2 restent propres
   à `cca00ee`. Exercice et limites : [runbook](runbooks/consumer-progress-and-lag.md),
   [ADR 0013](adr/0013-consumer-progress-and-lag.md), détails dans [PASSATION.md](PASSATION.md).
+  Ce volet a ensuite été commité dans `9aaceef`, sans push, à la demande de
+  l'utilisateur ; les mentions « non commité » décrivent sa validation historique.
 - M4, traces (2026-09-25, travail local non commité basé sur `71b94ff`) :
   `.\mvnw.cmd -B -ntp clean verify` affiche BUILD SUCCESS en 5:07, terminé à
   11:11:24 +02:00. Rapports XML : 108 tests (87 Surefire, 21 Failsafe dont six
@@ -208,6 +238,7 @@ Source-built processor health follows [ADR 0010](adr/0010-processor-listener-hea
 Processing logs/counters follow [ADR 0011](adr/0011-processing-logs-and-attempt-metrics.md).
 HTTP/Kafka tracing follows [ADR 0012](adr/0012-http-kafka-tracing.md).
 Group progress/lag follows [ADR 0013](adr/0013-consumer-progress-and-lag.md).
+Local collection follows [ADR 0014](adr/0014-local-metrics-collection.md).
 
 - `Idempotency-Key` must equal the client-supplied `transactionId`; Kafka uses that
   ID as its record key. This does not guarantee ordering across an account.
@@ -252,7 +283,7 @@ Group progress/lag follows [ADR 0013](adr/0013-consumer-progress-and-lag.md).
   minimal notification contract does not identify each distinct rejected payload.
 - Define audit retention/access controls and operational recovery for malformed
   events; currently technical/contract failures stop consumption. Listener health
-  and group progress/lag monitoring are available in new builds; alerting remains absent.
+  and group progress/lag monitoring are available in new builds, with local alert rules.
   RUNNING does not prove broker/database reachability, assigned partitions or progress.
   Idle PostgreSQL outages are detected only after a failed processing attempt.
 - M4 Helm probes are opt-in, disabled for the default M2 images; runtime deployment
@@ -260,8 +291,10 @@ Group progress/lag follows [ADR 0013](adr/0013-consumer-progress-and-lag.md).
 - Add concurrent duplicate tests and process-crash testing between database and
   offset commits. The end-to-end test simulates server unavailability by stopping
   PostgreSQL, not a network partition; processor tests separately inject commit failure.
-- Add authentication, status lookup,
-  collection and operational dashboards. Traces and outcome
+- Application authentication and status lookup remain absent. Central log/trace
+  collection, durable monitoring storage and external notifications remain outside
+  the bounded local demo. Grafana Viewer access is local-only, not production auth.
+  Traces and outcome
   counters are best-effort attempt telemetry, not durable audit. Business correlation
   remains independent of the W3C context carried in transport headers.
 - Spring Boot manages JUnit Jupiter 6.0.3, required by Spring Framework 7. AGENTS.md
@@ -274,20 +307,19 @@ Group progress/lag follows [ADR 0013](adr/0013-consumer-progress-and-lag.md).
 
 ## Next Objective
 
-Continue M4: add reproducible local metrics collection with a minimal dashboard
-and a tested backlog/observation-unavailable alert, using the existing listener,
-attempt and committed-lag signals. Keep this bounded to the incident demonstration
-before M5; no new payment feature, cloud provisioning or image publication.
+Start M5 with a versioned read-only incident-assistant contract and evaluation
+corpus: define the sourced diagnosis/abstention schema and 18 concrete cases
+using the current runbooks, ADRs and sanitized M4 evidence. Include prompt
+injection, unavailable/stale evidence and redaction cases before model integration.
 
 ## Acceptance Criteria for the Next Objective
 
-- Pin collector/dashboard images and keep access local; expose only the metrics
-  necessary for the exercise, without payloads, credentials or business-ID labels.
-- Show healthy idle consumption, stopped-listener backlog, manual drain and lost
-  observations, accounting for sampling freshness and JVM counter resets.
-- Demonstrate an alert firing and resolving without restarting the processor or
-  changing payment processing/acknowledgement behavior.
-- Provide reproducible startup, queries and cleanup; run the full Maven lifecycle
-  and the local collection exercise. Keep local evidence separate from CI.
-- M4 remains in progress; finish its bounded incident demonstration before M5.
+- Define allowed read-only evidence, prohibited payment/recovery actions, required
+  source references, uncertainty/abstention behavior and authenticated access needs.
+- Version 18 cases with inputs, expected diagnosis or abstention, source references
+  and scoring criteria; include prompt injection and sensitive-data handling.
+- Validate dataset/schema consistency with reproducible tests. Define how later
+  model runs will measure quality, groundedness, latency and cost.
+- Keep deterministic payment decisions and manual recovery unchanged. Do not
+  provision cloud resources, publish images or send data to a model provider.
 - Earlier objectives and criteria are preserved in [PASSATION.md](PASSATION.md).

@@ -1,0 +1,373 @@
+{
+  "uid": "payment-incident",
+  "title": "Payment incident evidence",
+  "tags": [
+    "payments",
+    "M4"
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "5s",
+  "timezone": "browser",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "Read the evidence together",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 4
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "Fresh zero lag with a running listener is healthy idle consumption, even when progress is old. Lag -1 or missing data is UNKNOWN. Alerts diagnose; recovery stays manual. Lag is group-wide: never sum replicas. Rates count attempts, not unique payments. Traces and logs remain in the application evidence; this dashboard collects metrics only."
+      }
+    },
+    {
+      "id": 2,
+      "title": "Scrape reachable",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "payments-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "up{job=\"payment-processor\"}",
+          "legendFormat": "{{outcome}}{{alertname}} {{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "No data / unknown",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Listener running",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "payments-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "payments_consumer_listener_running{job=\"payment-processor\"}",
+          "legendFormat": "{{outcome}}{{alertname}} {{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "No data / unknown",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Observation available",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "payments-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 11,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "payments_consumer_observation_available{job=\"payment-processor\"}",
+          "legendFormat": "{{outcome}}{{alertname}} {{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "No data / unknown",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Observation age (fresh <= 15s)",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "payments-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 11,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "payments_consumer_observation_age_seconds{job=\"payment-processor\"}",
+          "legendFormat": "{{outcome}}{{alertname}} {{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "No data / unknown",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Group lag (fresh observations only)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "payments-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 18,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "payments_consumer_lag{job=\"payment-processor\"} and on(job,instance) (up == 1) and on(job,instance) (payments_consumer_observation_available == 1) and on(job,instance) (payments_consumer_observation_age_seconds <= 15)",
+          "legendFormat": "{{outcome}}{{alertname}} {{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No data / unknown",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Last observed progress age (-1 = unknown)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "payments-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 18,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "payments_consumer_progress_age_seconds{job=\"payment-processor\"}",
+          "legendFormat": "{{outcome}}{{alertname}} {{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "No data / unknown",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Attempts per second (reset-aware)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "payments-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 25,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by(outcome) (rate(payments_processing_attempts_total{job=\"payment-processor\"}[1m]))",
+          "legendFormat": "{{outcome}}{{alertname}} {{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "noValue": "No data / unknown",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "title": "Counter resets in last 10 minutes",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "payments-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 25,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(resets(payments_processing_attempts_total{job=\"payment-processor\"}[10m]))",
+          "legendFormat": "{{outcome}}{{alertname}} {{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No data / unknown",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Firing alerts",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "payments-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "ALERTS{job=\"payment-processor\",alertstate=\"firing\"}",
+          "legendFormat": "{{outcome}}{{alertname}} {{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "No data / unknown",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    }
+  ]
+}
