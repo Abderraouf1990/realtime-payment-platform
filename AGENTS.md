@@ -22,7 +22,7 @@ Build practical AI engineering expertise and demonstrate senior DevSecOps capabi
 - `transaction-api`: REST API, request validation, idempotency-key handling, and Kafka event publication.
 - `transaction-processor`: Kafka event consumption, deterministic business validation, and idempotent ledger persistence.
 - `payment-e2e-tests`: black-box tests of the packaged applications with Kafka and PostgreSQL.
-- `incident-assistant`: isolated offline incident context construction; no payment dependencies or execution tools.
+- `incident-assistant`: isolated incident context and diagnosis runner; no payment dependencies or execution tools, real-model integration remains opt-in.
 
 ## Architecture Rules
 

@@ -634,6 +634,9 @@ builds a context after principal/scope checks, typed evidence filtering and boun
 retrieval from hash-verified documents. Run `.\mvnw.cmd -pl incident-assistant -am test`
 and inspect `incident-assistant/target/retrieval-coverage.csv`; see the
 [context exercise](docs/assistant/v1/context-builder.md) for measured misses and limits.
+The [diagnosis runner](docs/assistant/v1/diagnosis-runner.md) adds bounded inference,
+strict output checks and a per-case report using an abstaining fake. Unknown token
+usage/cost stays unknown; fixed output language intentionally limits free-text replies.
 No model or assistant server is integrated yet; trusted injected identity does
 not establish HTTP authentication or model quality. See
 [ADR 0015](docs/adr/0015-read-only-incident-assistant-contract.md).

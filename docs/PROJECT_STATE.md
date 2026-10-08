@@ -1,6 +1,6 @@
 # Project State
 
-Updated: 2026-10-07
+Updated: 2026-10-08
 
 ## Objectif principal et statuts actuels
 
@@ -9,16 +9,26 @@ DevSecOps senior avec une plateforme de paiement déployable et un assistant
 d'incident sécurisé et évalué. Les décisions de paiement restent déterministes.
 L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
 
-| Statut | Situation au 2026-10-07 |
+| Statut | Situation au 2026-10-08 |
 | --- | --- |
 | TERMINÉ | M0 à M2 selon les [preuves datées](PASSATION.md#validated-state) ; M3 validé localement et commité dans `6c84939`. Cela ne constitue pas une validation CI de M3. |
 | TERMINÉ LOCALEMENT | M4 : santé, logs, traces, compteurs, lag, collecte, dashboard et alertes ; démonstration locale bornée validée, sans revendication CI ni production. |
-| EN COURS | M5 : contrat/corpus commité dans `96a242d` ; constructeur de contexte hors ligne validé localement, 134 tests Maven réussis. Aucun modèle intégré ; M5 reste ouvert. |
-| À FAIRE | Construire le runner de diagnostic avec port d'inférence, validation stricte des sorties et rapport d'évaluation ; modèle réel désactivé avant choix et budget. Critères exacts en fin de fichier. |
-| BLOQUÉ | Aucun blocage actuel démontré pour poursuivre M5 localement. Une publication, un push ou un déploiement cloud restent soumis à autorisation. |
+| EN COURS | M5 : contexte commité dans `1f3e476` ; runner, contrôle des sorties et rapport sur 18 cas validés localement. 141 tests Maven réussis ; aucun modèle réel intégré. |
+| À FAIRE | Un adaptateur de modèle réel et une première évaluation mesurée, après choix du modèle, du périmètre de données et du budget. Critères exacts en fin de fichier. |
+| BLOQUÉ | Aucun blocage du volet courant. Les choix modèle/données/budget sont requis avant les appels réels ; aucune publication, push ou infrastructure cloud autorisés par ce travail. |
 | ABANDONNÉ | Aucun nouvel abandon observé. L'outbox et M6 restent différés, pas abandonnés. |
 
 ## Current Implementation
+
+- `DiagnosisRunner` now wraps context construction and a provider-neutral port.
+  Denied/rejected context never invokes inference. One worker/no queue, bounded
+  timeout (1 ms–30 s), cancellation and fixed failure results bound local waiting.
+  `ResponsePolicy` validates v1 schema, citation membership, freshness/typed facts,
+  and exact approved output language; arbitrary prose, secrets/actions and
+  unsupported diagnoses reject the response. Usage is optional; estimated cost
+  needs complete counts and explicit dated pricing. No real provider adapter exists.
+  The corpus fake always abstains. See [ADR 0017](adr/0017-diagnosis-runner-and-output-boundary.md)
+  and [runner exercise](assistant/v1/diagnosis-runner.md).
 
 - `incident-assistant` is a standalone Java/Jackson library with two read-only
   ports (evidence and sources); payment modules do not depend on it. It checks
@@ -37,8 +47,8 @@ L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
   answers, citations and semantic scoring criteria. Four JUnit tests run in the
   existing test module. That first slice added no production code. Its specified
   in-process authorization/projection boundary is now implemented above; verified
-  gateway identity, model/output controls and prompt-injection evaluation remain
-  future work. No model was run.
+  gateway identity and real-model/prompt-injection evaluation remain future work;
+  restricted output controls are now implemented above. No real model was run.
 
 - Maven application modules: `shared-contracts`, `transaction-api`, and `transaction-processor`.
   `payment-e2e-tests` runs the packaged applications in separate JVMs for black-box testing.
@@ -158,6 +168,24 @@ L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
   [local exercise](runbooks/local-observability.md).
 
 ## Validated State
+
+- The context-builder slice was subsequently committed as `1f3e476`, without push;
+  its pre-commit evidence below remains historical.
+- Runner focused validation (2026-10-08, work based on `1f3e476`): all 18 module
+  tests pass in 15.227 s. Seven new tests cover no-call, valid diagnosis, invalid
+  output, stale/conflicting evidence, timeout/no queue, failures and usage/cost.
+  All 18 corpus cases pass boundary checks: 13 fake calls/validated abstentions,
+  two denied and three rejected before inference. Model/human scores and unknown
+  cost remain null. Source recall remains 19/22, separately reported.
+  Logs: `artifacts/m5-runner-focused.log`; generated report:
+  `incident-assistant/target/diagnosis-evaluation.json`.
+- Full runner validation `.\mvnw.cmd -B -ntp clean verify` succeeds in 6:35,
+  ending 2026-10-08 at 20:17:18 +02:00, exit 0. XML recount: 141 tests
+  (118 Surefire, 23 Failsafe including seven E2E), zero failures/errors/skips.
+  Final report confirms 18 boundary passes and 13 fake calls. Log:
+  `artifacts/m5-runner-verify.log`. `git diff --check` passes. Local uncommitted
+  work based on `1f3e476`, not a new CI or real-model result. This slice is complete;
+  model/data/budget selection is required before the next real-inference exercise.
 
 - The first M5 contract/corpus slice was subsequently committed as `96a242d`,
   without push; its pre-commit local evidence below is historical.
@@ -295,6 +323,7 @@ Group progress/lag follows [ADR 0013](adr/0013-consumer-progress-and-lag.md).
 Local collection follows [ADR 0014](adr/0014-local-metrics-collection.md).
 The offline assistant contract follows [ADR 0015](adr/0015-read-only-incident-assistant-contract.md).
 Offline context construction follows [ADR 0016](adr/0016-offline-incident-context.md).
+Diagnosis execution/output validation follows [ADR 0017](adr/0017-diagnosis-runner-and-output-boundary.md).
 
 - `Idempotency-Key` must equal the client-supplied `transactionId`; Kafka uses that
   ID as its record key. This does not guarantee ordering across an account.
@@ -334,10 +363,13 @@ Offline context construction follows [ADR 0016](adr/0016-offline-incident-contex
 
 ## Current Gaps and Known Build Notes
 
-- M5 has no inference or assistant server. In-process authorization relies on a
+- M5 has no real-model adapter or assistant server. In-process authorization relies on a
   trusted injected principal, not implemented HTTP authentication. Retrieval is
   English lexical matching with measured misses; raw logs are rejected, not
-  parsed/redacted. Model/output security, quality, latency and cost remain unmeasured.
+  parsed/redacted. Output uses approved fixed language, not general prose redaction;
+  recovered/replay_possible are not yet supported by runtime evidence guards.
+  Cancellation cannot force a remote service to stop billing. Real-model security,
+  quality, latency, cost, network deadlines and spending caps remain unvalidated.
 
 - No outbox: committed rejection audits and Kafka notifications are not atomic.
   Recovery depends on replay of retained input; publication can be repeated and the
@@ -368,23 +400,27 @@ Offline context construction follows [ADR 0016](adr/0016-offline-incident-contex
 
 ## Next Objective
 
-Implement the read-only diagnosis runner around the context builder: a
-provider-neutral inference port, strict response/citation validation and an
-evaluation report for the 18-case corpus. Use a deterministic fake for local
-boundary tests; real inference remains opt-in after model and budget selection.
+Integrate one opt-in real-model adapter and run the first measured evaluation
+against the 18 cases, after the user selects the model/provider, permitted data
+scope and maximum request/run budget. Preserve the existing fake for offline tests.
 
 ## Acceptance Criteria for the Next Objective
 
-- Never invoke inference for denied/rejected context or expose raw request,
-  identity, gold answers or scoring rubrics in model input; test zero calls.
-- Validate the response schema, citation membership, abstention rules and output
-  redaction before returning a diagnosis. Reject fabricated references, sensitive
-  output and action requests; no execution tools or payment decisions.
-- Define and test an explicit inference timeout and usage/cost reporting contract,
-  including unavailable usage and provider failures. No fabricated cost or quality.
-- Run the 18 cases through a reproducible runner with per-case reports; separate
-  deterministic boundary checks, retrieval misses and model/human quality scores.
-- Keep actual provider/model credentials and paid calls disabled until the user
-  approves a concrete model, data scope and budget. Run the full Maven lifecycle;
-  preserve deterministic payments and manual recovery.
+- Record concrete model/version, approved sanitized data scope, per-call/run
+  spending ceilings, timeout and dated pricing before enabling real calls.
+  Until those choices exist, perform only offline implementation and tests.
+- Add one provider adapter with network deadlines, cancellation, bounded outputs,
+  usage normalization and budget enforcement; credentials come from external
+  configuration and never enter context, reports or logs.
+- Version the prompt and approved output-language policy; test provider failures,
+  malformed output and redaction with offline fixtures before a real run.
+- Execute three repetitions per eligible case within the approved budget; record
+  source/prompt/corpus revisions, real token usage/cost, latency p50/p95 and all
+  boundary failures. Preserve missing usage as unknown and blocked cases as no-call.
+- Review case-specific correctness and passage groundedness separately from
+  schema/citation membership and fake boundary results; report retrieval misses,
+  unsupported diagnoses and abstentions honestly. M5 is not complete until its
+  quality and authenticated-access criteria are demonstrated.
+- Run full Maven validation; no payment actions, automatic recovery, Git push,
+  image publication or cloud provisioning is implied.
 - Earlier objectives and criteria are preserved in [PASSATION.md](PASSATION.md).

@@ -6,6 +6,9 @@ production incident data are needed. Policy: [ADR 0015](../../adr/0015-read-only
 The next slice now implements an offline context boundary in an isolated Java
 module. See [context builder](context-builder.md) for commands, measured retrieval
 coverage and remaining limits. The original contract/corpus below stays versioned.
+An [offline diagnosis runner](diagnosis-runner.md) now adds timeout, usage reporting
+and a restricted output boundary. Its corpus fake always abstains; this does not
+constitute real-model evaluation or acceptance of arbitrary v1 prose.
 
 ## Files and boundaries
 

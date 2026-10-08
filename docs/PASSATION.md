@@ -1,6 +1,6 @@
 # Passation — historique et preuves
 
-Updated: 2026-10-07
+Updated: 2026-10-08
 
 ## Rôle de ce document
 
@@ -918,4 +918,83 @@ bundle for later inference; no model/provider integration in this step.
   limits without claiming model quality or implemented production authentication.
 - Run focused boundary tests and the full Maven lifecycle. Preserve payment
   decisions, acknowledgement and manual recovery; no provider calls or cloud work.
+- Earlier objectives and criteria are preserved in [PASSATION.md](PASSATION.md).
+
+## M5 - diagnosis runner and output validation - 2026-10-08
+
+### Réalisation, compromis et exercice
+
+- Départ propre à `1f3e476`, commit du constructeur de contexte précédemment
+  validé. Les preuves antérieures décrivent leur date/état avant commit.
+- `DiagnosisRunner` n'invoque son port d'inférence qu'après un contexte prêt.
+  Il transmet contexte filtré/version de politique, jamais identité/question brute
+  ni réponses attendues. Un worker sans queue, délai configuré borné à 30 s,
+  interruption et erreurs fixes limitent l'attente. Un adaptateur non coopératif
+  reste susceptible d'occuper le worker ; il ne reçoit pas de requête en attente.
+- `ResponsePolicy` valide le schéma fermé, les doublons/clés supplémentaires,
+  citations, preuves fraîches et quelques gardes factuelles. Il exige ensuite
+  des formulations approuvées exactes. Les secrets, commandes et toute prose
+  arbitraire rejettent la réponse entière. Compromis explicite : sécurité de
+  sortie vérifiable sans prétendre comprendre toute phrase, mais expression
+  limitée. Ce sous-ensemble n'accepte pas encore recovered/replay_possible.
+- Les compteurs de tokens sont optionnels et validés. Le coût estimé exige des
+  compteurs complets et des tarifs datés explicites ; inconnus/erreurs/timeouts
+  ne deviennent jamais un coût zéro. Les prix du test sont fictifs. Aucun
+  mécanisme de budget réseau/fournisseur réel n'est encore implémenté.
+- Le faux modèle du corpus s'abstient systématiquement. Le rapport par cas
+  sépare contrôles du parcours, statuts attendu/retourné, références manquées,
+  appels, latence locale et scores modèle/humain non mesurés. Aucun score de
+  diagnostic n'est déduit d'un succès de validation de schéma.
+- Exercice : `.\mvnw.cmd -B -ntp -pl incident-assistant -am test`, puis lire
+  `incident-assistant/target/diagnosis-evaluation.json`. Comparer C01 (abstention
+  valide mais diagnostic attendu) et C15 (zéro inférence). Lire le test de timeout
+  non coopératif et expliquer pourquoi annulation locale ne prouve pas absence
+  de facturation. [Guide](assistant/v1/diagnosis-runner.md),
+  [ADR 0017](adr/0017-diagnosis-runner-and-output-boundary.md).
+
+### Validation locale
+
+- Dix-huit tests du module réussissent en 15.227 s, le 2026-10-08 à
+  20:09:43 +02:00, zéro échec/erreur/ignoré. Sept nouveaux tests couvrent accès,
+  réponse valide, schéma/citations/secrets/actions invalides, données périmées
+  ou contradictoires, timeout sans queue, erreurs et calcul/absence de coût.
+  Journal : `artifacts/m5-runner-focused.log`.
+- Les 18 cas passent les contrôles du parcours : 13 appels au faux modèle avec
+  abstention validée, deux refus d'accès et trois rejets de preuves sans appel.
+  Le rappel de sources reste 19/22 ; les manques de C04/C10/C12 restent visibles.
+  Rapports sous `incident-assistant/target/`, ignorés par Git et reproductibles.
+- Cycle complet `.\mvnw.cmd -B -ntp clean verify` réussi en 6:35 le 2026-10-08,
+  terminé à 20:17:18 +02:00, code 0. Recompte XML : 118 Surefire + 23 Failsafe
+  = 141 tests, dont sept E2E, zéro échec/erreur/ignoré. Rapport final : 18 contrôles
+  du parcours réussis et 13 appels au faux modèle. `git diff --check` passe.
+  Journal : `artifacts/m5-runner-verify.log`. Critères du volet runner satisfaits ;
+  aucune preuve de modèle réel ni de CI n'en est déduite.
+- Travail local non commité basé sur `1f3e476`. Aucun fournisseur réel, secret,
+  appel payant, push, publication ou nouveau run CI. Paiements/ack/reprise inchangés.
+  M5 reste en cours. Prochain volet : un adaptateur réel et une évaluation mesurée
+  après choix explicite du modèle, des données admises et du budget.
+
+### Previous objective and criteria (preserved)
+
+## Next Objective
+
+Implement the read-only diagnosis runner around the context builder: a
+provider-neutral inference port, strict response/citation validation and an
+evaluation report for the 18-case corpus. Use a deterministic fake for local
+boundary tests; real inference remains opt-in after model and budget selection.
+
+## Acceptance Criteria for the Next Objective
+
+- Never invoke inference for denied/rejected context or expose raw request,
+  identity, gold answers or scoring rubrics in model input; test zero calls.
+- Validate the response schema, citation membership, abstention rules and output
+  redaction before returning a diagnosis. Reject fabricated references, sensitive
+  output and action requests; no execution tools or payment decisions.
+- Define and test an explicit inference timeout and usage/cost reporting contract,
+  including unavailable usage and provider failures. No fabricated cost or quality.
+- Run the 18 cases through a reproducible runner with per-case reports; separate
+  deterministic boundary checks, retrieval misses and model/human quality scores.
+- Keep actual provider/model credentials and paid calls disabled until the user
+  approves a concrete model, data scope and budget. Run the full Maven lifecycle;
+  preserve deterministic payments and manual recovery.
 - Earlier objectives and criteria are preserved in [PASSATION.md](PASSATION.md).

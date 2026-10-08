@@ -19,6 +19,12 @@ class CorpusRetrievalTests {
         var fixtures = JSON.readTree(Files.readString(ROOT.resolve("docs/assistant/v1/context-fixtures.json"))).get("cases");
         assertThat(corpus.size()).isEqualTo(18); assertThat(fixtures.size()).isEqualTo(18);
         var report = new StringBuilder("case,status,expectedSourceCount,retrievedExpectedSourceCount,retrievedSourceIds\n");
+        var runnerReport = JSON.createObjectNode();
+        runnerReport.put("mode", "deterministic-abstaining-fake");
+        runnerReport.putNull("modelQuality"); runnerReport.putNull("humanQuality");
+        var runs = runnerReport.putArray("cases");
+        var responsePolicy = new ResponsePolicy(ROOT.resolve("docs/assistant/v1/response.schema.json"));
+        int inferenceTotal = 0;
         int ready = 0, expectedTotal = 0, foundTotal = 0, anyHit = 0;
         for (int i = 0; i < corpus.size(); i++) {
             var item = corpus.get(i); var fixture = fixtures.get(i);
@@ -51,9 +57,32 @@ class CorpusRetrievalTests {
             var request = new ContextBuilder.Request(scope, input.get("question").asString());
             var result = builder.build(principal, request);
             assertThat(result.status()).as(item.get("id").asString()).isEqualTo(fixture.get("boundaryStatus").asString());
+            var inferenceCalls = new AtomicInteger();
+            DiagnosisRunner.Result diagnosis;
+            try (var runner = new DiagnosisRunner(builder, responsePolicy, (modelInput, timeout) -> {
+                inferenceCalls.incrementAndGet();
+                assertThat(JSON.writeValueAsString(modelInput)).doesNotContain("expected", "mustMention", "mustNotClaim",
+                        "FAKE-SECRET-CANARY", "FAKE-ACCOUNT-CANARY", "OVERRIDE-CANARY", "fixture-user", "incident-for-");
+                // Deliberately always abstain. No oracle data, case ID, or diagnosis claim in this fake.
+                return new DiagnosisRunner.Reply(ResponsePolicy.proposal("unknown", List.of(), List.of()).toString(), null);
+            }, Duration.ofSeconds(1), null)) {
+                diagnosis = runner.run(principal, request);
+            }
+            assertThat(inferenceCalls).hasValue(result.status().equals("ready") ? 1 : 0);
+            inferenceTotal += inferenceCalls.get();
+            var row = runs.addObject().put("caseId", item.get("id").asString())
+                    .put("contextStatus", result.status()).put("runnerStatus", diagnosis.status())
+                    .put("inferenceCalls", inferenceCalls.get()).put("elapsedMillis", diagnosis.elapsedMillis());
+            row.putNull("cost"); row.putNull("modelScore"); row.putNull("humanScore");
+            row.put("boundaryPassed", diagnosis.status().equals(result.status().equals("ready") ? "completed" : result.status()));
+            assertThat(row.get("boundaryPassed").asBoolean()).isTrue();
+            row.put("expectedStatus", item.get("expected").get("response").get("status").asString());
+            if (diagnosis.response() != null) row.put("returnedStatus", diagnosis.response().get("status").asString());
+            else row.putNull("returnedStatus");
             if (!result.status().equals("ready")) {
                 assertThat(sourceCalls).hasValue(0);
-                assertThat(evidenceCalls).hasValue(result.status().equals("denied") ? 0 : 1);
+                assertThat(evidenceCalls).hasValue(result.status().equals("denied") ? 0 : 2);
+                row.putArray("missingSourceIds"); // Not evaluated for contexts denied/rejected before retrieval.
                 report.append(item.get("id").asString()).append(',').append(result.status()).append(",0,0,\n");
                 continue;
             }
@@ -67,6 +96,8 @@ class CorpusRetrievalTests {
             var expected = new HashSet<String>();
             for (var id : item.get("expected").get("policySourceIds")) expected.add(id.asString());
             var found = new HashSet<>(expected); found.retainAll(retrieved);
+            var missing = new TreeSet<>(expected); missing.removeAll(retrieved);
+            var missingIds = row.putArray("missingSourceIds"); missing.forEach(missingIds::add);
             ready++; expectedTotal += expected.size(); foundTotal += found.size(); if (!found.isEmpty()) anyHit++;
             report.append(item.get("id").asString()).append(",ready,").append(expected.size()).append(',')
                     .append(found.size()).append(',').append(String.join("|", retrieved)).append('\n');
@@ -77,6 +108,9 @@ class CorpusRetrievalTests {
                 .append(expectedTotal).append("; casesWithAnyExpectedSource=").append(anyHit).append('/').append(ready).append('\n');
         Path output = Path.of("target", "retrieval-coverage.csv"); Files.createDirectories(output.getParent());
         Files.writeString(output, report.toString());
+        assertThat(inferenceTotal).isEqualTo(13);
+        runnerReport.put("casesExercised", 18).put("inferenceCalls", inferenceTotal);
+        Files.writeString(Path.of("target", "diagnosis-evaluation.json"), JSON.writerWithDefaultPrettyPrinter().writeValueAsString(runnerReport));
         assertThat(foundTotal).isPositive();
     }
 }
