@@ -30,6 +30,7 @@
         <module>transaction-api</module>
         <module>transaction-processor</module>
         <module>payment-e2e-tests</module>
+        <module>incident-assistant</module>
     </modules>
 
     <properties>

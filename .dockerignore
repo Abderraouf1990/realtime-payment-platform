@@ -31,6 +31,9 @@ transaction-processor/src/**
 !payment-e2e-tests/
 payment-e2e-tests/**
 !payment-e2e-tests/pom.xml
+!incident-assistant/
+incident-assistant/**
+!incident-assistant/pom.xml
 # Directory exceptions above also include descendants; exclude generated/private files last.
 **/target
 **/src/test

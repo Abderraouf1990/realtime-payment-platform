@@ -629,9 +629,13 @@ or send notifications; application logs/traces remain separate evidence.
 
 The [v1 contract and evaluation corpus](docs/assistant/v1/README.md) define
 read-only diagnosis, sourced findings, abstention, access/redaction requirements
-and 18 synthetic development cases. Maven checks their schema, references and
-source hashes. No model or assistant server is integrated yet; these checks do
-not establish runtime security or model quality. See
+and 18 synthetic development cases. The isolated `incident-assistant` module now
+builds a context after principal/scope checks, typed evidence filtering and bounded
+retrieval from hash-verified documents. Run `.\mvnw.cmd -pl incident-assistant -am test`
+and inspect `incident-assistant/target/retrieval-coverage.csv`; see the
+[context exercise](docs/assistant/v1/context-builder.md) for measured misses and limits.
+No model or assistant server is integrated yet; trusted injected identity does
+not establish HTTP authentication or model quality. See
 [ADR 0015](docs/adr/0015-read-only-incident-assistant-contract.md).
 
 ## Secure image delivery (M2)

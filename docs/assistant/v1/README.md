@@ -3,6 +3,10 @@
 This directory specifies M5; it does not run an assistant. No provider calls or
 production incident data are needed. Policy: [ADR 0015](../../adr/0015-read-only-incident-assistant-contract.md).
 
+The next slice now implements an offline context boundary in an isolated Java
+module. See [context builder](context-builder.md) for commands, measured retrieval
+coverage and remaining limits. The original contract/corpus below stays versioned.
+
 ## Files and boundaries
 
 - `response.schema.json`: closed output shape; unknown fields are rejected.

@@ -15,7 +15,7 @@ Build practical expertise in AI engineering and demonstrate senior DevSecOps cap
 | M2 | Secure image delivery | Completed for cca00ee | Authorized manual run 35661616528 passed all gates and published both images. Registry manifests/configs independently match the tested bundle, source SHA and non-root configuration. See PROJECT_STATE.md and docs/evidence/m2-publication.json. |
 | M3 | Local Kubernetes deployment | Completed locally | Isolated kind/Helm acceptance passed: M2 image digests, restricted non-root workloads, injected Secret, API/infra probes, payment outcomes, upgrade/rollback and PVC retention. Processor listener-health limitation is explicit in ADR 0009; no M3 CI claim. |
 | M4 | Observability and incident exercises | Completed local baseline | Health, logs, counters, traces and committed lag; pinned local Prometheus/Grafana, Viewer dashboard and tested alerts. 119 Maven tests, seven rule cases and isolated scrape-loss/SQL-outage/manual-recovery exercise pass. See PROJECT_STATE.md; no M4 CI or production claim. |
-| M5 | Secure, evaluated incident assistant | In progress | Offline read-only contract, response schema and 18 versioned development cases implemented. Runtime retrieval, access/redaction controls and model quality/latency/cost evaluation remain open; no assistant runtime claim. |
+| M5 | Secure, evaluated incident assistant | In progress | Contract, 18 cases and offline authorized context builder implemented; bounded hash-verified retrieval measured. Gateway authentication, inference/output controls and model quality/latency/cost evaluation remain open. |
 | M6 | Optional cloud demonstration | Deferred | Choose provider and budget explicitly; reproducible deployment and teardown; no cloud provisioning implied by this roadmap. |
 
 M1–M4 prepare the environment and evidence for M5. Keep these milestones bounded: AI must not be postponed indefinitely by additional payment features. Each milestone needs a reproducible demonstration, not a claim of production readiness.
@@ -25,14 +25,13 @@ evidence, sourced structured diagnosis and abstention, 15–20 evaluation cases
 including prompt injection, measured quality/latency/cost, authenticated access
 and redaction. The offline contract alone does not complete this milestone.
 
-## Current task: M5, offline incident-context builder
+## Current task: M5, diagnosis runner and output validation
 
-Implement the first offline context builder using the versioned contract and
-18-case corpus: principal/scope checks before evidence access, allowlisted
-redaction and bounded retrieval from hash-verified sources. Keep reference
-answers out of inference context. See PROJECT_STATE.md for exact criteria;
-model integration and evaluation follow this boundary. Deterministic payment
-decisions and manual recovery stay unchanged.
+Implement a read-only diagnosis runner with a provider-neutral inference port,
+strict schema/citation/output checks and a per-case evaluation report. Use a
+deterministic fake for boundary tests; real provider calls stay disabled until
+model, data scope and budget are approved. See PROJECT_STATE.md for exact criteria.
+Deterministic payment decisions and manual recovery stay unchanged.
 Keep new payment features and cloud deployment out of scope.
 M2 publication was authorized only for cca00ee; further Git pushes and image
 publications still require the user's approval.
@@ -111,3 +110,9 @@ publications still require the user's approval.
   four artifact/negative-mutation tests. M5 remains in progress: next implement
   the offline authorized/redacted context builder, then model integration and
   measured evaluation. No priority change, provider call or CI claim.
+- 2026-10-07: Offline context builder locally validated on work based on `96a242d`:
+  134 Maven tests pass and both payment images build. All 18 cases exercised;
+  13 ready contexts, two access denials, three evidence rejections. Retrieval
+  finds 19/22 expected source IDs, with documented misses and no model-quality
+  claim. Next is the diagnosis runner/output boundary; M5 remains in progress.
+  No priority change, provider call, push, publication or new CI run.

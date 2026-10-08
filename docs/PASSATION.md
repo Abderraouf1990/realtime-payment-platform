@@ -831,3 +831,91 @@ injection, unavailable/stale evidence and redaction cases before model integrati
 - Keep deterministic payment decisions and manual recovery unchanged. Do not
   provision cloud resources, publish images or send data to a model provider.
 - Earlier objectives and criteria are preserved in [PASSATION.md](PASSATION.md).
+
+## M5 - offline incident context - 2026-10-07
+
+### Réalisation et compromis
+
+- Départ propre à `96a242d`, commit du contrat/corpus M5 précédemment validé,
+  sans push. Les preuves historiques avant commit restent conservées.
+- Nouveau module Java `incident-assistant`, sans dépendance aux paiements ni
+  client réseau/modèle. Principal injecté séparément, rôle incident-reader,
+  expiration et couple incident/service vérifiés avant les deux adaptateurs.
+  Ce contrôle suppose une identité déjà vérifiée ; aucune authentification HTTP.
+- Projections de preuves typées, valeurs bornées, refus des champs inconnus,
+  secrets/payloads/logs bruts et scopes incohérents. Alias locaux pour corrélation
+  et parenté de traces ; aucune question brute, identité ou scope original dans
+  le bundle. Les observations inconnues/anciennes restent telles quelles.
+- Sources limitées au manifeste déployé et immuable : vérification de toutes les
+  empreintes, chemins réels, refus des traversées et liens, erreurs sans détails
+  sensibles. Jusqu'à six extraits avec source/hash/lignes exactes ; pas d'outil
+  d'exécution. Les commandes contenues dans les documents restent des données.
+- Compromis : recherche lexicale anglaise simple et déterministe, sans fournisseur
+  ni index externe, au prix de références manquées et de détails libres omis.
+  Les alias ne sont stables que dans un bundle. Le manifeste est une configuration
+  de confiance, pas une défense contre une modification privilégiée concurrente.
+- Les 18 cas ont des projections structurées séparées dans `context-fixtures.json`.
+  Réponses attendues, rubriques et références idéales ne sont jamais des entrées
+  du constructeur ; l'évaluateur les lit ensuite. C13/C14 rejettent les champs
+  d'injection plutôt que répondre à la question initiale : ce résultat ne prouve
+  pas une résistance d'un modèle aux injections.
+- Exercice : `.\mvnw.cmd -B -ntp -pl incident-assistant -am test`, puis lire
+  `incident-assistant/target/retrieval-coverage.csv`. Comparer les sources C10 aux
+  références attendues et expliquer le risque du manque de l'ADR de publication.
+  Exécuter aussi le test d'altération sur copie temporaire. Détails et limites :
+  [ADR 0016](adr/0016-offline-incident-context.md),
+  [guide](assistant/v1/context-builder.md).
+
+### Validation locale
+
+- Onze tests ciblés passent en 6.570 s, le 2026-10-07 à 21:41:45 +02:00 :
+  zéro accès avant autorisation, champs/canaris refusés, alias, données invalides,
+  horodatages futurs, limites de taille, erreurs fixes, références et hash,
+  déterminisme, traversal/ID inconnu et corpus complet.
+  Journal : `artifacts/m5-context-focused.log`.
+- Sur 18 cas : 13 contextes prêts, deux refus d'accès, trois rejets de preuves
+  avant lecture des sources. Rappel des IDs de sources : 19/22 (86,4 %) sur les
+  cas prêts ; 13/13 contiennent au moins une source attendue. Manques explicites :
+  C04 sql-runbook, C10 rejection, C12 policy. Aucun score de pertinence des passages,
+  d'entailment ou de qualité d'un diagnostic n'est revendiqué.
+- `docker compose build transaction-api transaction-processor` termine avec code 0.
+  `.dockerignore` inclut seulement le POM du nouveau module pour l'énumération
+  Maven ; le code assistant n'entre pas dans les images de paiement.
+  Journal : `artifacts/m5-context-images.log` ; le diagnostic PowerShell
+  NativeCommandError correspond à stderr Docker, pas à un échec de construction.
+- Cycle complet `.\mvnw.cmd -B -ntp clean verify` réussi en 6:14, terminé
+  le 2026-10-07 à 21:48:37 +02:00, code 0. Recompte XML : 111 Surefire et
+  23 Failsafe, soit 134 tests dont sept E2E, zéro échec/erreur/ignoré.
+  Journal : `artifacts/m5-context-verify.log`. Le rapport final conserve 19/22
+  sources attendues et les mêmes refus/rejets. `git diff --check` passe.
+  Les critères de ce volet sont satisfaits ; limites de couverture conservées,
+  aucun blocage restant pour le prochain volet.
+- Travail local non commité basé sur `96a242d`. Aucun appel fournisseur, push,
+  publication d'image, nouveau run CI ou changement de paiement/ack/reprise.
+  M5 reste en cours : prochain volet runner de diagnostic, port d'inférence et
+  validation stricte des sorties, avec faux modèle déterministe pour les tests.
+
+### Previous objective and criteria (preserved)
+
+## Next Objective
+
+Implement the first offline incident-context builder: verify an injected trusted
+principal and incident scope, redact allowlisted evidence, and retrieve bounded
+excerpts only from the versioned source manifest. Return a traceable context
+bundle for later inference; no model/provider integration in this step.
+
+## Acceptance Criteria for the Next Objective
+
+- Deny missing identity or unauthorized scope before reading evidence or sources;
+  test zero adapter calls on denial. Identity cannot come from request text.
+- Accept only allowed snapshot fields, replace sensitive correlations with local
+  aliases, and reject raw payloads, credentials and unsupported fields before
+  producing context. Test the corpus canaries and adversarial text.
+- Verify source hashes and path boundaries, return bounded excerpts with source
+  IDs and evidence provenance, and fail closed on tampering or unknown references.
+- Demonstrate deterministic offline retrieval on the 18-case corpus; keep expected
+  answers and scoring rubrics out of the context. Report retrieval coverage and
+  limits without claiming model quality or implemented production authentication.
+- Run focused boundary tests and the full Maven lifecycle. Preserve payment
+  decisions, acknowledgement and manual recovery; no provider calls or cloud work.
+- Earlier objectives and criteria are preserved in [PASSATION.md](PASSATION.md).
