@@ -39,6 +39,12 @@
              Remove when the Boot BOM manages 11.0.26 or later (see ADR 0008). -->
         <tomcat.version>11.0.26</tomcat.version>
 
+        <!-- Security patches beyond Boot 4.0.8's BOM; keep each Jackson family aligned.
+             Remove overrides when the Boot BOM manages these versions or later (ADR 0008). -->
+        <jackson-bom.version>3.1.7</jackson-bom.version>
+        <jackson-2-bom.version>2.21.7</jackson-2-bom.version>
+        <lz4-java.version>1.11.4</lz4-java.version>
+
         <maven.compiler.release>${java.version}</maven.compiler.release>
         <maven.compiler.parameters>true</maven.compiler.parameters>
 
@@ -53,6 +59,12 @@
 
     <dependencyManagement>
         <dependencies>
+            <!-- Kafka clients brings LZ4 transitively; Boot 4.0.8 does not manage it. -->
+            <dependency>
+                <groupId>at.yawk.lz4</groupId>
+                <artifactId>lz4-java</artifactId>
+                <version>${lz4-java.version}</version>
+            </dependency>
             <dependency>
                 <groupId>com.aayadi.payment</groupId>
                 <artifactId>shared-contracts</artifactId>

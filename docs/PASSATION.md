@@ -1112,3 +1112,88 @@ L'implémentation est faite, l'exécution réelle et la revue restent à accompl
   BUILD SUCCESS, code 0, 6:03, fin 2026-10-11 02:42:53 +02:00. Recompte XML :
   140 Surefire et 23 Failsafe = 163 tests, dont sept E2E et 40 assistant,
   zéro échec/erreur/ignoré. Journal `artifacts/m5-live-verify.log`.
+
+## 2026-10-11 — Diagnostic CI pour 81ce039
+
+- Le commit M5 est `81ce039`. Le run GitHub Actions
+  [38099691298](https://github.com/Abderraouf1990/realtime-payment-platform/actions/runs/38099691298)
+  déclenché par push échoue dans `images`, job
+  [114353605183](https://github.com/Abderraouf1990/realtime-payment-platform/actions/runs/38099691298/job/114353605183).
+- Les jobs build, secrets et code-analysis passent. Le journal build confirme
+  BUILD SUCCESS, 40 tests assistant et sept E2E, puis neuf tests Python OK.
+  Construction des deux images et exercice Compose passent également.
+- L'étape de scan produit huit occurrences HIGH pour transaction-api et treize
+  pour transaction-processor : CVE-2026-84782 dans libssl3t64/openssl,
+  CVE-2026-106451 dans at.yawk.lz4:lz4-java, CVE-2026-89407/89425 dans
+  jackson-core, CVE-2026-68497/91776/91777 dans jackson-databind. Jackson 3
+  apparaît dans les deux images ; Jackson 2 apparaît aussi dans le processor.
+  Ces comptes sont des occurrences de rapports, pas des vulnérabilités uniques
+  ni une preuve d'exploitation. Aucune version corrigée n'a été vérifiée ici.
+- Le script bloque les résultats HIGH/CRITICAL conformément à la politique.
+  Les scanners ont terminé ; la mise à jour proposée de Trivy et les warnings
+  Node ne sont pas la cause de cet échec. Pas de résultat de fuite de secret
+  dans les findings bloquants affichés. Artefact `image-security`, ID
+  11687955265, conservé avec les rapports JSON expurgés et SBOMs.
+- Pas de relance du run, de correction de dépendance, d'exception de sécurité,
+  de publication ou de push par l'assistant. Seuls l'état et cette preuve sont
+  mis à jour. La prochaine tâche M5 C09/C11 reste inchangée ; la remédiation CI
+  est un blocage de livraison distinct, à traiter avec les versions corrigées
+  des paquets OS et Java et un nouveau scan des deux images.
+- Exercice reproductible : ouvrir l'étape de scan du job lié ci-dessus et
+  comparer ses findings à `trivy_findings` dans `scripts/security_gate.py`.
+  Un build fonctionnel vert ne démontre pas l'absence de vulnérabilité connue.
+
+## 2026-10-11 — Remédiation locale du scan CI
+
+- L'utilisateur a demandé la correction du blocage avant de reprendre M5.
+  L'artefact GitHub `image-security` du run 38099691298 a été téléchargé et
+  vérifié : SHA-256 ZIP
+  `0e0e77cd509bab3ffee0f723e3162bff919d6738702cce5369858319af6c64c5`,
+  identique au digest indiqué par le job. Les JSON donnent les versions
+  installées et corrigées ; ils restent sous `artifacts/ci-81ce039/`.
+- Mise à jour ciblée sans changement de Boot 4.0.8 : BOM Jackson 3.1.5 → 3.1.7,
+  BOM Jackson 2.21.5 → 2.21.7 et dépendance transitive LZ4 1.10.1 → 1.11.4.
+  Les JARs packagés confirment ces versions ; aucune bibliothèque SQL n'est
+  ajoutée à l'API. Les tests couvrent encore les frontières JSON de l'assistant.
+- Les deux Dockerfiles conservent les digests Temurin et actualisent uniquement
+  openssl/libssl3t64. `dpkg --compare-versions` exige au minimum le correctif
+  Noble 3.0.13-0ubuntu3.16 ; la version effectivement installée est 3.16 dans
+  les deux images. UID/GID 10001 conservés. Compromis et sources : ADR 0008.
+- Images locales `payments/<module>:ci-remediation`, non publiées :
+  API `sha256:c1b69fe366d41be16de9d21a58211c97c5d1fc27742faa02caaecf9b02b29ea0`,
+  processor `sha256:b8ad6dfe82812ebd3d61669222eaa6f432cd524206e921994d5e3ab7316a41a7`.
+  Les labels OCI référencent la base 81ce039, pas un commit de correction.
+  Empreintes normalisées des inputs dans `artifacts/ci-remediation/input-provenance.json`.
+- Tests Maven : BUILD SUCCESS en 10:17, code 0, fin 15:55:37 +02:00 ;
+  XML 140 Surefire + 23 Failsafe = 163 tests, zéro échec/erreur/ignoré.
+  Journal `artifacts/ci-remediation-verify.log`. Les neuf tests Python passent
+  après une relance autorisée hors sandbox pour l'accès aux répertoires temporaires.
+- Compose passe avec les images construites, projet isolé
+  `payments-smoke-afbacf2107` : non-root, paiement accepté, doublon, rejet durable,
+  événement Kafka, volumes et reprise. Nettoyage terminé ; journal
+  `artifacts/ci-remediation-compose.log`.
+- Le scan initial Trivy échoue sur son timeout cinq minutes pendant le
+  renouvellement de la base Java ; il n'est pas compté comme succès. Délai
+  explicite 15m pour scans image et SBOM, sans changer les seuils ou la politique
+  fail-closed. Le script de gate utilise le Python installé via PATH pour la
+  relance, car l'alias WindowsApps ne démarrait pas Python. Le scan source avait
+  terminé ; son JSON brut est contrôlé et expurgé avec le même garde-fou.
+- Scans finaux des deux archives : zéro HIGH, CRITICAL et secret ; 39 MEDIUM
+  et quatre LOW occurrences par image restent visibles. L'ID dans chaque rapport
+  correspond à l'image testée. Rapports expurgés sous
+  `artifacts/ci-remediation/<module>/trivy.json`, source sous `source/secrets.json`.
+  Aucun ignore, suppression ou base de vulnérabilités périmée. Le scan source
+  passe également. Cette preuve locale ne rend pas vert le run GitHub historique.
+- Aucun changement métier, commit, push, publication ou nouvelle campagne
+  OpenAI. M2 reste historiquement complet pour cca00ee ; M5 reste en cours.
+  Prochaine tâche exacte après remédiation locale : sélection et tests de passages
+  C09/C11, avec les critères existants de PROJECT_STATE.
+- Exercice : comparer les versions installées/corrigées du rapport CI aux
+  SBOMs locaux et aux versions de paquets des nouvelles images. Le digest de
+  base fixe l'origine, mais pas les paquets récupérés depuis un dépôt apt courant ;
+  le contrôle de version minimale et le scan de l'archive finale sont complémentaires.
+- Les deux scans/SBOMs finaux terminent avec code 0. Inventaires : 196 composants
+  API et 223 processor. `artifacts/ci-remediation/scan-summary.json` lie les
+  empreintes SHA-256 des archives, rapports et SBOMs aux IDs d'images testées.
+  Vérification supplémentaire du JAR API : pas de PostgreSQL, spring-jdbc ou
+  hibernate-core. `git diff --check` passe ; aucune nouvelle CI pour la correction.

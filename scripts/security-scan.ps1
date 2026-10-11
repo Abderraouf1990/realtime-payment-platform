@@ -34,11 +34,11 @@ if ($SourceOnly) {
     & docker image save --output (Join-Path $output 'image.tar') $Image
     if ($LASTEXITCODE -ne 0) { throw 'Image export failed' }
     Invoke-Scanner @('image', '--input', '/reports/image.tar', '--scanners', 'vuln,secret',
-        '--format', 'json', '--output', '/reports/.raw-trivy.json')
+        '--timeout', '15m', '--format', 'json', '--output', '/reports/.raw-trivy.json')
     & python (Join-Path $PSScriptRoot 'security_gate.py') trivy (Join-Path $output '.raw-trivy.json') `
         --sanitized-output (Join-Path $output 'trivy.json')
     $gateCode = $LASTEXITCODE
     Invoke-Scanner @('image', '--input', '/reports/image.tar', '--format', 'cyclonedx',
-        '--output', '/reports/sbom.cdx.json')
+        '--timeout', '15m', '--output', '/reports/sbom.cdx.json')
 }
 if ($gateCode -ne 0) { throw 'Security policy failed; inspect the redacted reports' }

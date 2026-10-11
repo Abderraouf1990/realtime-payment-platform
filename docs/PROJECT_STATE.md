@@ -70,6 +70,13 @@ L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
   `payment-e2e-tests` runs the packaged applications in separate JVMs for black-box testing.
 - Parent manages Java 25 and Spring Boot 4.0.8; Maven Wrapper pins Maven 3.9.0.
   Tomcat is explicitly upgraded from the BOM's 11.0.24 to 11.0.26 for security fixes.
+- Current CI remediation keeps Boot 4.0.8 but overrides the Jackson 3/2 BOMs
+  to 3.1.7/2.21.7 and manages Kafka's transitive LZ4 at 1.11.4. Both runtime
+  Dockerfiles update OpenSSL/libssl and require at least Noble
+  `3.0.13-0ubuntu3.16`, retaining the pinned Temurin digests and non-root user.
+  Trivy image/SBOM operations have a bounded 15-minute timeout for cold Java DB
+  downloads; every scanner error and HIGH/CRITICAL/secret finding still blocks.
+  See [ADR 0008](adr/0008-secure-image-delivery.md).
 - `shared-contracts` contains framework-free `contracts.v1.TransactionReceived`
   (including `correlationId`), `TransactionRejected` and `TransactionType` (`TRANSFER`).
 - `transaction-api` depends on the contracts module and implements
@@ -184,6 +191,47 @@ L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
   [local exercise](runbooks/local-observability.md).
 
 ## Validated State
+
+- Local CI remediation (2026-10-11, uncommitted work based on `81ce039`):
+  Jackson 3.1.7/2.21.7 BOMs, LZ4 1.11.4 and runtime OpenSSL/libssl
+  3.0.13-0ubuntu3.16 replace the vulnerable versions in the CI reports.
+  Both corrected image archives pass the unchanged Trivy HIGH/CRITICAL/secret
+  gate: zero HIGH, zero CRITICAL, zero secrets; each retains 39 MEDIUM and four
+  LOW occurrences. Scans use fresh databases with the pinned Trivy 0.74.0.
+  No suppression, severity exception, offline vulnerability scan or stale DB.
+  Exact image IDs match the scanned reports and both run as 10001:10001.
+  `.\scripts\verify-compose.ps1` passes for those two tags in isolated project
+  `payments-smoke-afbacf2107`, including accepted/duplicate/rejected outcomes,
+  Kafka notification, down/up retention and cleanup. `.\mvnw.cmd -B -ntp clean
+  verify` passes in 10:17, ending 2026-10-11 15:55:37 +02:00, exit 0:
+  163 tests (140 Surefire, 23 Failsafe), zero failures/errors/skips. Nine Python
+  security/promotion tests and the source-secret gate pass.
+  Evidence: `artifacts/ci-remediation/`, `artifacts/ci-remediation-verify.log`,
+  `artifacts/ci-remediation-compose.log` and the per-image build/scan logs.
+  Both final scans/SBOMs complete with exit 0; inventories contain 196 API
+  and 223 processor components. `scan-summary.json` binds report, SBOM and
+  archive SHA-256 values to the tested image IDs. The packaged API still has
+  no PostgreSQL, spring-jdbc or hibernate-core dependency. `git diff --check` passes.
+  Initial Trivy timeout is recorded as failure; final image scans use 15m.
+  The local Python alias was unusable; validation selects the installed Python
+  through PATH without changing security logic. OCI labels identify the base
+  commit, while `input-provenance.json` identifies the uncommitted build inputs.
+  Remote CI for the correction remains unverified; no commit, push, publication,
+  new model campaign or change to payment semantics. Local delivery remediation
+  is complete; the exact next task remains M5 C09/C11 passage selection below.
+
+- GitHub CI inspected for committed M5 `81ce039` on 2026-10-11:
+  [run 38099691298](https://github.com/Abderraouf1990/realtime-payment-platform/actions/runs/38099691298)
+  fails only in the `images` job's security scan. Maven build/tests, nine Python
+  gate tests, actionlint, checkout secret scan, CodeQL and exact-image Compose
+  acceptance pass. Trivy policy reports eight HIGH occurrences in the API image
+  and thirteen in the processor: OpenSSL/libssl, LZ4 and Jackson 2/3. These are
+  scanner advisory occurrences, not distinct exploits. Scan reports/SBOMs are
+  retained in the run's `image-security` artifact; no promotion bundle or
+  publication. Dependency/OS remediation is unresolved; no exemption or repair
+  was applied in this read-only CI diagnosis. This does not extend M2's historical
+  security result for `cca00ee` to current images. M5 is committed in `81ce039`;
+  the uncommitted descriptions below refer to the earlier validation worktree.
 
 - First live campaign (2026-10-11, uncommitted work based on `e53ca18`):
   40 offline module tests pass before execution; 39 count requests and 39

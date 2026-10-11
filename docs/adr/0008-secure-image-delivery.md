@@ -129,3 +129,46 @@ pinned Kafka/PostgreSQL infrastructure images and the payment behavior unchanged
 Exercise: compare the before/after image SBOMs, inspect Kafka's LZ4 dependency,
 and rerun `scripts/security-scan.ps1` against the rebuilt image. The final image
 scan, not the selected version number alone, determines policy compliance.
+
+## Targeted remediation after the 2026-10-11 scan
+
+The [CI run for 81ce039](https://github.com/Abderraouf1990/realtime-payment-platform/actions/runs/38099691298)
+passed functional checks but blocked current images on eight API and thirteen
+processor HIGH advisory occurrences. Keep Boot 4.0.8 and the existing digest-pinned
+Temurin bases; apply security patches within the existing dependency lines:
+
+- Override Boot's Jackson BOM properties to 3.1.7 and 2.21.7, rather than updating
+  only core/databind and leaving other Jackson modules on incompatible versions.
+  The [maintainer advisory](https://github.com/FasterXML/jackson-core/security/advisories/GHSA-p6pp-m3f8-5c89)
+  and the downloaded CI reports identify these patch lines as corrected for the
+  reported Jackson findings. Full image scans still decide acceptance.
+- Manage `at.yawk.lz4:lz4-java` 1.11.4 directly in the reactor's dependency
+  management because Boot does not manage Kafka's transitive LZ4 dependency.
+  The [maintainer's fix](https://github.com/yawkat/lz4-java/security/advisories/GHSA-mcr4-qmvw-px4g)
+  changes native library extraction; no workaround or severity exception is used.
+- In each runtime Dockerfile, update only `openssl` and `libssl3t64` through
+  Ubuntu's repositories, then require both installed versions to be at least
+  `3.0.13-0ubuntu3.16`. This is the Noble fix listed by
+  [Ubuntu](https://ubuntu.com/security/CVE-2026-84782). A missing fix fails the
+  build instead of producing a knowingly vulnerable image. Delete apt indexes
+  before the layer completes and retain UID/GID 10001 and the pinned base digest.
+
+Tradeoff: targeted overrides and OS updates avoid an unrelated Boot/JDK migration
+but add temporary maintenance and a dependency on the current apt repositories.
+The minimum fixed OS version allows later security updates; it does not pin the
+apt repository snapshot. Docker may reuse a cached update layer, so a future
+package remediation must rebuild it without cache (or change the pinned base).
+Fresh Trivy databases and scans of the exact archives remain mandatory.
+Image scans and SBOM generation use a bounded fifteen-minute Trivy timeout;
+the five-minute default expired locally while downloading the Java database.
+This follows the [scanner troubleshooting guidance](https://trivy.dev/docs/v0.74/guide/references/troubleshooting/#timeout).
+Timeouts and other scanner errors still fail closed; the severity policy and
+CI job deadline are unchanged.
+Remove Java overrides when a reviewed Boot BOM manages equal or newer releases;
+review the OS step when moving to a base already containing the fix.
+
+The published M2 digests and their historical evidence do not change. This local
+remediation authorizes neither another AI campaign nor image publication/push.
+Exercise: compare the CI `trivy.json` installed/fixed versions with each rebuilt
+image's SBOM and OS versions; explain why a successful Maven build alone did not
+detect the vulnerable OS layer.

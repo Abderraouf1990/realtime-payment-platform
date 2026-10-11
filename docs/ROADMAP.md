@@ -137,3 +137,14 @@ publications still require the user's approval.
   with human scores unmeasured. Preserve the marker; next improve C09/C11 passage
   selection offline. M5 remains in progress; milestone order is unchanged and
   no second campaign, push, publication or cloud deployment is authorized.
+- 2026-10-11: User requested remediation of the CI image-scan failure for
+  `81ce039` before continuing M5 passage work. Scope is corrected Java/OS
+  dependencies, local Maven/Compose validation and exact-image security scans,
+  with unchanged security thresholds and payment behavior. Resume C09/C11
+  after the local delivery blocker is resolved. No push, publication or new
+  model campaign is implied; milestone order remains unchanged.
+- 2026-10-11: Local remediation passes 163 Maven tests, nine Python gate tests,
+  exact-image Compose acceptance, source-secret checks and both Trivy image scans
+  (zero HIGH/CRITICAL/secrets), with SBOMs and bound evidence. Correction is
+  uncommitted on `81ce039`; remote CI remains to be demonstrated. Resume M5
+  C09/C11 offline passage selection; no new milestone completion or publication.

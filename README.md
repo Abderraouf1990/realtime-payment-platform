@@ -656,11 +656,14 @@ configured. See [ADR 0008](docs/adr/0008-secure-image-delivery.md) for coverage,
 permissions, artifact handling and limitations, and
 [PROJECT_STATE](docs/PROJECT_STATE.md) for actual validation results.
 
-The dependency remediation uses Boot 4.0.8's BOM plus a targeted Tomcat 11.0.26
-override; see the rationale and override removal condition in ADR 0008. Kafka
+The dependency remediation keeps Boot 4.0.8 and uses targeted Tomcat 11.0.26,
+Jackson 3.1.7/2.21.7 BOM and LZ4 1.11.4 overrides. Runtime images update OpenSSL
+packages and require Ubuntu's minimum fixed version. See the rationale,
+validation evidence and override removal conditions in ADR 0008. Kafka
 clients are now 4.1.2 while the pinned local/test broker remains 4.1.1. The local
-image scans pass the blocking policy; remaining MEDIUM/LOW findings are visible
-in the reports. [CI run 35653382625](https://github.com/Abderraouf1990/realtime-payment-platform/actions/runs/35653382625)
+image scan results for each revision are recorded in PROJECT_STATE; remaining
+MEDIUM/LOW findings remain visible in reports.
+[CI run 35653382625](https://github.com/Abderraouf1990/realtime-payment-platform/actions/runs/35653382625)
 passed for commit cca00ee, including CodeQL, Compose, image/secret gates and SBOMs.
 The publication job was skipped on that push. After explicit approval,
 [manual run 35661616528](https://github.com/Abderraouf1990/realtime-payment-platform/actions/runs/35661616528)
