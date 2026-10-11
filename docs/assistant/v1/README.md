@@ -10,6 +10,13 @@ An [offline diagnosis runner](diagnosis-runner.md) now adds timeout, usage repor
 and a restricted output boundary. Its corpus fake always abstains; this does not
 constitute real-model evaluation or acceptance of arbitrary v1 prose.
 
+The [OpenAI evaluation launcher](openai-evaluation.md) adds an explicitly approved
+model, dated pricing, budget guards and three-repetition reporting. Ordinary tests
+remain offline. The [first live campaign](live-evaluation-2026-10-11.md) completed
+with insufficient assertion/passage coverage; its marker prevents a second run.
+Human quality scores remain pending and are not inferred from fake results,
+schema validation or the agent review.
+
 ## Files and boundaries
 
 - `response.schema.json`: closed output shape; unknown fields are rejected.

@@ -1,6 +1,6 @@
 # Passation — historique et preuves
 
-Updated: 2026-10-08
+Updated: 2026-10-11
 
 ## Rôle de ce document
 
@@ -998,3 +998,117 @@ boundary tests; real inference remains opt-in after model and budget selection.
   approves a concrete model, data scope and budget. Run the full Maven lifecycle;
   preserve deterministic payments and manual recovery.
 - Earlier objectives and criteria are preserved in [PASSATION.md](PASSATION.md).
+
+## 2026-10-11 — Adaptateur OpenAI et campagne opt-in (évaluation réelle en attente)
+
+### Décision et travail effectué
+
+- L'utilisateur a accepté l'API OpenAI directe, `gpt-5.4-mini-2026-03-17`, les
+  preuves synthétiques filtrées et extraits documentaires versionnés, 0,05 USD
+  par appel et 2 USD pour cette campagne. La distinction entre ce budget et la
+  facture globale (autres usages, taxes, achat de crédits) a été expliquée avant
+  accord. ChatGPT Plus ne configure pas la clé API nécessaire à cette voie.
+- `OpenAiInference` utilise Java HttpClient, sans SDK supplémentaire, outils,
+  redirection ou retry. Le prompt inclut le schéma et les formulations canoniques
+  sans réponses de référence du corpus. Les sorties passent toujours le contrôle
+  local strict ; la génération fournisseur reste textuelle.
+- Le comptage distant des tokens précède toute génération, avec le même input,
+  modèle, prompt et réglage de raisonnement. La réservation de 0,05 USD précède
+  même le comptage ; le calcul d'admission utilise le tarif d'entrée sans remise
+  et 2000 tokens de sortie maximum. Tarifs USD/million datés du 2026-10-11 :
+  0,75 entrée, 0,075 entrée cachée, 4,50 sortie. Le lanceur refuse ces hypothèses
+  après sept jours sans revue. Délai commun de 30 s, corps réseau bornés à 64 Ko.
+- `EvaluationBudget` retient la réservation entière si l'usage est inconnu.
+  Une annulation locale ne garantit pas l'arrêt de la facturation distante.
+  La campagne limite à 39 tentatives et crée un marqueur durable hors `target` ;
+  une seconde exécution ou un lancement concurrent est refusé. Ce garde-fou
+  local n'est pas un plafond du compte fournisseur et ne résiste pas à une
+  suppression manuelle ou un autre checkout. Ne pas effacer le marqueur pour
+  relancer sans réconciliation des dépenses et nouvelle autorisation.
+- Le rapport conserve les empreintes du prompt effectif, corpus, projections,
+  manifest, schéma et sources Java, les usages/coûts inconnus, latences p50/p95,
+  sorties validées et contexte filtré pour revue. Pas de corps d'erreur fournisseur
+  ni de réponse rejetée. L'accord code/statut est séparé de la qualité humaine
+  et de l'appui réel des passages cités, laissés non mesurés.
+
+### Validation et limites
+
+- 38 tests du module passent localement, dont 11 tests HTTP sur serveur loopback
+  et trois tests du harnais répété. Journal `artifacts/m5-openai-focused.log`.
+  La simulation produit 54 lignes, 39 appels au faux modèle et 15 refus avant
+  inférence. Aucun de ces résultats ne mesure GPT-5.4 mini.
+- Validation complète finale : `.\mvnw.cmd -B -ntp clean verify`, code 0,
+  7:03, terminée le 2026-10-11 à 02:18:25 +02:00. Recompte XML : 140 Surefire
+  et 23 Failsafe, soit 163 tests dont sept E2E et 40 tests assistant ; zéro
+  échec/erreur/ignoré. Les 13 tests HTTP finaux incluent le refus d'un modèle
+  différent (tarif inapplicable) et de comptes de tokens mal formés.
+  Journal `artifacts/m5-openai-verify.log`. Classpath exécutable préparé ; script
+  PowerShell et point d'entrée Java refusent une clé absente sans réseau ni
+  marqueur de campagne. `git diff --check` passe.
+- Travail local basé sur `e53ca18`, sans nouveau commit, push ni CI. Les preuves
+  du runner ci-dessus précèdent son commit `e53ca18` et restent historiques.
+- `OPENAI_API_KEY` absente de la session : aucun appel réel, coût réel ou score
+  de qualité n'est revendiqué. M5 reste en cours ; l'authentification de passerelle,
+  les diagnostics unsupported et les manques de récupération restent explicites.
+- Compromis principal : un aller-retour de comptage et des réservations
+  conservatrices limitent le débit, mais évitent d'estimer les tokens par une
+  approximation fragile. Le langage fixe sécurise la sortie au prix du rejet
+  de paraphrases pourtant utiles.
+- Exercice reproductible : lancer `.\mvnw.cmd -B -ntp -pl incident-assistant -am test`,
+  comparer C01/C15 dans `incident-assistant/target/evaluation-preparation.json`,
+  puis expliquer les tests d'entrée trop coûteuse et de timeout réseau.
+  [Guide avec saisie locale masquée de la clé](assistant/v1/openai-evaluation.md),
+  [ADR 0018](adr/0018-opt-in-openai-evaluation.md).
+
+### Objectif précédent et critères conservés
+
+Intégrer un adaptateur réel opt-in et exécuter la première évaluation des 18 cas,
+après choix du fournisseur/modèle, périmètre de données et budget. Conserver le
+faux modèle hors ligne. Critères : consigner ces choix et tarifs datés ; borner
+réseau, annulation, sortie et dépenses ; externaliser les secrets ; versionner
+prompt/politique ; tester erreurs et fuites hors ligne ; trois répétitions par cas
+admissible avec révisions, usage/coût, latences et échecs ; revue humaine distincte
+du schéma/citations ; validation Maven complète sans action de paiement ni push.
+L'implémentation est faite, l'exécution réelle et la revue restent à accomplir.
+
+## 2026-10-11 — Première campagne réelle M5 et revue de l'agent
+
+- À la demande de continuation de M5, la campagne unique approuvée a été lancée
+  depuis Windows 11 / PowerShell 5.1 avec JDK 25.0.1. La présence de la variable
+  a été vérifiée sans lire/afficher sa valeur. Aucun secret dans les commandes,
+  rapports ou journaux. Les appels fournisseur ont réussi.
+- Les 40 tests hors ligne passent avant exécution. Le lancement réel termine
+  avec code 0 à 00:36:25 UTC : 39 comptages, 39 générations, 54 lignes dont
+  15 sans appel (C13–C17). 34 réponses validées, cinq sorties modèle rejetées ;
+  11 diagnostics et 23 abstentions. Aucun texte rejeté n'est conservé.
+- Usage complet : coût estimé 0,064752750 USD, aucune réservation inconnue,
+  aucun dépassement ; p50 1761 ms, p95 6324 ms. Ce calcul ne remplace pas une
+  facture fournisseur. Rapport local `artifacts/m5-openai-evaluation.json`,
+  marqueur durable `artifacts/m5-openai-2026-10-11.started` conservés.
+- Accord catégoriel 19/39 appels. Revue sémantique de l'agent : 10/42 assertions
+  requises exprimées ; 7/11 findings entièrement appuyés par les passages cités.
+  C09 et C11 illustrent un bon ID documentaire avec un passage insuffisant.
+  Les scores humains restent null ; aucune résistance modèle aux injections
+  C13/C14 n'est démontrée puisqu'elles sont rejetées avant inférence.
+- Compromis : langage fixe et projections structurées sécurisent les frontières
+  mais limitent l'explication ; des observations historiques au même instant
+  deviennent des contradictions. Pas de relâchement du contrôle ni modification
+  du corpus pour masquer ces défauts. M5 reste en cours.
+- Le lanceur sélectionne désormais Java via JAVA_HOME et vérifie Java 25,
+  indépendamment du Java 8 trouvé dans le PATH. Préflight Java, refus sans opt-in
+  et refus du marqueur existant vérifiés sans nouvel appel fournisseur.
+- Travail non commité basé sur `e53ca18`, identifié par hashes dans le rapport.
+  Pas de push, publication, nouvelle CI, cloud ou action de paiement. Une nouvelle
+  campagne exige réconciliation des dépenses et nouvelle autorisation ; le
+  marqueur ne doit pas être supprimé.
+- Revue détaillée et exercice reproductible :
+  [live-evaluation-2026-10-11.md](assistant/v1/live-evaluation-2026-10-11.md).
+  Comparer C09 rep 3 aux passages réellement cités, puis expliquer pourquoi
+  présence d'une citation n'implique pas appui sémantique.
+- Prochaine tâche exacte : tests et sélection de passages hors ligne pour que
+  C09/C11 contiennent les sémantiques commit et export ; la revue humaine,
+  la couverture des assertions et la passerelle authentifiée restent ouvertes.
+- Validation complète après la campagne : `.\mvnw.cmd -B -ntp clean verify`,
+  BUILD SUCCESS, code 0, 6:03, fin 2026-10-11 02:42:53 +02:00. Recompte XML :
+  140 Surefire et 23 Failsafe = 163 tests, dont sept E2E et 40 assistant,
+  zéro échec/erreur/ignoré. Journal `artifacts/m5-live-verify.log`.

@@ -34,6 +34,8 @@ that a keyword filter can reliably distinguish every secret or harmful command,
 but limits usefulness. Citation membership and typed fact guards are not a human
 groundedness review. See [ADR 0017](../../adr/0017-diagnosis-runner-and-output-boundary.md).
 
-No real provider, credentials, prices or paid calls are configured. Actual model
-evaluation needs an approved model/data scope/budget, a network adapter with
-deadlines and spending caps, and the existing versioned evaluation protocol.
+An opt-in OpenAI adapter and approved dated price/budget configuration now exist.
+The exercise above remains entirely offline; credentials and real evaluation are
+separate. See [OpenAI evaluation](openai-evaluation.md). Real quality and cost
+are recorded in the [first live campaign review](live-evaluation-2026-10-11.md);
+human quality review remains pending and M5 acceptance is not met.

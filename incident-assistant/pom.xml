@@ -8,7 +8,7 @@
         <version>0.0.1-SNAPSHOT</version>
     </parent>
     <artifactId>incident-assistant</artifactId>
-    <description>Offline read-only incident context boundary; no model client or server</description>
+    <description>Read-only incident assistant with opt-in model evaluation; no server</description>
     <dependencies>
         <dependency><groupId>tools.jackson.core</groupId><artifactId>jackson-databind</artifactId></dependency>
         <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>

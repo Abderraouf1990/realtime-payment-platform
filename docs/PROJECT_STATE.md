@@ -1,6 +1,6 @@
 # Project State
 
-Updated: 2026-10-08
+Updated: 2026-10-11
 
 ## Objectif principal et statuts actuels
 
@@ -9,16 +9,30 @@ DevSecOps senior avec une plateforme de paiement déployable et un assistant
 d'incident sécurisé et évalué. Les décisions de paiement restent déterministes.
 L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
 
-| Statut | Situation au 2026-10-08 |
+| Statut | Situation au 2026-10-11 |
 | --- | --- |
 | TERMINÉ | M0 à M2 selon les [preuves datées](PASSATION.md#validated-state) ; M3 validé localement et commité dans `6c84939`. Cela ne constitue pas une validation CI de M3. |
 | TERMINÉ LOCALEMENT | M4 : santé, logs, traces, compteurs, lag, collecte, dashboard et alertes ; démonstration locale bornée validée, sans revendication CI ni production. |
-| EN COURS | M5 : contexte commité dans `1f3e476` ; runner, contrôle des sorties et rapport sur 18 cas validés localement. 141 tests Maven réussis ; aucun modèle réel intégré. |
-| À FAIRE | Un adaptateur de modèle réel et une première évaluation mesurée, après choix du modèle, du périmètre de données et du budget. Critères exacts en fin de fichier. |
-| BLOQUÉ | Aucun blocage du volet courant. Les choix modèle/données/budget sont requis avant les appels réels ; aucune publication, push ou infrastructure cloud autorisés par ce travail. |
+| EN COURS | M5 : première campagne réelle terminée, 39 générations, 0,064752750 USD estimé ; 34 réponses validées, cinq sorties rejetées. Qualité et appui documentaire insuffisants selon la revue de l'agent ; aucune validation humaine ou authentification de passerelle. |
+| À FAIRE | Améliorer hors ligne la sélection de passages C09/C11 avec des tests de leur contenu, puis poursuivre la couverture des assertions et l'accès authentifié. Prochaine tâche exacte en fin de fichier. |
+| BLOQUÉ | La campagne unique est consommée : conserver son marqueur, pas de relance sans réconciliation des dépenses et nouvelle autorisation. La clé est présente et les appels ont fonctionné ; la qualité M5 reste insuffisante. Aucun push, publication ou cloud autorisés. |
 | ABANDONNÉ | Aucun nouvel abandon observé. L'outbox et M6 restent différés, pas abandonnés. |
 
 ## Current Implementation
+
+- `OpenAiInference` implements the opt-in direct OpenAI Responses adapter for
+  `gpt-5.4-mini-2026-03-17`. Prompt/policy are versioned; standard pricing is dated
+  2026-10-11. Input-token counting precedes generation; 2000 output tokens, a shared
+  30-second deadline, bounded bodies, cancellation and no retries/tools/redirects.
+  `EvaluationBudget` reserves USD 0.05 before each attempt; unknown cost retains
+  that reservation. `CorpusEvaluation` checkpoints three repetitions per case,
+  hashes/revisions, usage, latency p50/p95 and review context, with human scores
+  explicitly unmeasured. A durable campaign marker and 39-attempt limit prevent
+  accidental second runs. The marker is outside Maven target; do not delete it to
+  bypass spend reconciliation. The first approved live campaign has completed;
+  see [agent review](assistant/v1/live-evaluation-2026-10-11.md). See
+  [ADR 0018](adr/0018-opt-in-openai-evaluation.md) and
+  [reproducible exercise](assistant/v1/openai-evaluation.md).
 
 - `DiagnosisRunner` now wraps context construction and a provider-neutral port.
   Denied/rejected context never invokes inference. One worker/no queue, bounded
@@ -26,7 +40,8 @@ L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
   `ResponsePolicy` validates v1 schema, citation membership, freshness/typed facts,
   and exact approved output language; arbitrary prose, secrets/actions and
   unsupported diagnoses reject the response. Usage is optional; estimated cost
-  needs complete counts and explicit dated pricing. No real provider adapter exists.
+  needs complete counts and explicit dated pricing. The OpenAI adapter above is
+  opt-in; normal Maven validation retains the fake and loopback HTTP fixtures.
   The corpus fake always abstains. See [ADR 0017](adr/0017-diagnosis-runner-and-output-boundary.md)
   and [runner exercise](assistant/v1/diagnosis-runner.md).
 
@@ -48,7 +63,8 @@ L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
   existing test module. That first slice added no production code. Its specified
   in-process authorization/projection boundary is now implemented above; verified
   gateway identity and real-model/prompt-injection evaluation remain future work;
-  restricted output controls are now implemented above. No real model was run.
+  restricted output controls are now implemented above. The first live campaign
+  and its quality limitations are recorded in Validated State.
 
 - Maven application modules: `shared-contracts`, `transaction-api`, and `transaction-processor`.
   `payment-e2e-tests` runs the packaged applications in separate JVMs for black-box testing.
@@ -168,6 +184,43 @@ L'ordre approuvé des jalons reste celui de [ROADMAP.md](ROADMAP.md).
   [local exercise](runbooks/local-observability.md).
 
 ## Validated State
+
+- First live campaign (2026-10-11, uncommitted work based on `e53ca18`):
+  40 offline module tests pass before execution; 39 count requests and 39
+  generations complete, 54 report rows including 15 blocked no-call rows.
+  All usage is known; estimated USD 0.064752750, no budget breach; p50/p95
+  1761/6324 ms. 34 validated responses (11 diagnoses, 23 abstentions), five
+  generated outputs rejected. Categorical agreement 19/39 eligible attempts.
+  Agent review: 10/42 required assertions expressed and 7/11 factual findings
+  fully supported by exact retrieved passages; human scores remain null.
+  M5 acceptance fails; see [review and exercise](assistant/v1/live-evaluation-2026-10-11.md).
+  Raw report and durable marker remain under `artifacts/`; no rerun, push,
+  publication or new CI result. Historical missing-key entries below describe
+  their earlier session, not this environment. Full Maven rerun
+  `.\mvnw.cmd -B -ntp clean verify` passes in 6:03, ending at
+  2026-10-11 02:42:53 +02:00, exit 0: 163 tests (140 Surefire, 23 Failsafe),
+  zero failures/errors/skips. Log: `artifacts/m5-live-verify.log`. Launcher Java
+  preflight, opt-in refusal and existing-marker refusal pass without API calls.
+
+- The runner slice was subsequently committed as `e53ca18` without push; its
+  pre-commit evidence below remains historical. Current work is uncommitted on
+  that base; no new CI result is claimed.
+- OpenAI focused validation (2026-10-11): 38 module tests pass, zero
+  failures/errors/skips. Eleven loopback HTTP tests cover token-count preflight,
+  budget refusal, usage, HTTP failures/redirects, malformed/oversized output,
+  incomplete responses, body timeout, interruption and secret rejection.
+  The repeated offline harness reports 54 rows, 39 fake invocations and 15 blocked
+  no-call rows; quality and real cost remain unknown. Logs:
+  `artifacts/m5-openai-focused.log`; report:
+  `incident-assistant/target/evaluation-preparation.json`.
+- Full `.\mvnw.cmd -B -ntp clean verify` succeeds in 7:03, ending 2026-10-11
+  at 02:18:25 +02:00, exit 0. XML recount: 140 Surefire + 23 Failsafe = 163
+  tests, including seven E2E and 40 assistant tests, zero failures/errors/skips.
+  Thirteen HTTP tests now additionally cover wrong-model pricing refusal and
+  malformed token counts. Log: `artifacts/m5-openai-verify.log`.
+  Runtime classpath preparation succeeds; both the PowerShell launcher and real
+  Java entry point refuse missing credentials before any API request or campaign
+  marker. `git diff --check` passes. No live evaluation, new commit or CI claim.
 
 - The context-builder slice was subsequently committed as `1f3e476`, without push;
   its pre-commit evidence below remains historical.
@@ -363,13 +416,17 @@ Diagnosis execution/output validation follows [ADR 0017](adr/0017-diagnosis-runn
 
 ## Current Gaps and Known Build Notes
 
-- M5 has no real-model adapter or assistant server. In-process authorization relies on a
+- M5 has a locally evaluated OpenAI adapter but no assistant server. In-process authorization relies on a
   trusted injected principal, not implemented HTTP authentication. Retrieval is
   English lexical matching with measured misses; raw logs are rejected, not
   parsed/redacted. Output uses approved fixed language, not general prose redaction;
   recovered/replay_possible are not yet supported by runtime evidence guards.
-  Cancellation cannot force a remote service to stop billing. Real-model security,
-  quality, latency, cost, network deadlines and spending caps remain unvalidated.
+  Cancellation cannot force a remote service to stop billing. Diagnosis
+  quality is insufficient in the first real development-corpus campaign;
+  latency and estimated cost now have local live evidence. Independent human
+  quality review and real-model injection resistance remain unmeasured.
+  API credentials were accessible and provider calls succeeded in this session.
+  Local campaign budgets do not cap account-wide charges, taxes or credit purchases.
 
 - No outbox: committed rejection audits and Kafka notifications are not atomic.
   Recovery depends on replay of retained input; publication can be repeated and the
@@ -400,27 +457,22 @@ Diagnosis execution/output validation follows [ADR 0017](adr/0017-diagnosis-runn
 
 ## Next Objective
 
-Integrate one opt-in real-model adapter and run the first measured evaluation
-against the 18 cases, after the user selects the model/provider, permitted data
-scope and maximum request/run budget. Preserve the existing fake for offline tests.
+Add offline tests and improve passage selection so C09's telemetry/commit
+distinction and C11's export/payment distinction are present in the retrieved
+excerpts. Preserve corpus, source manifest trust, strict output policy, fake
+tests and the first live campaign's immutable evidence. No new provider call
+is authorized by this next task. Do not delete its marker to retry.
 
 ## Acceptance Criteria for the Next Objective
 
-- Record concrete model/version, approved sanitized data scope, per-call/run
-  spending ceilings, timeout and dated pricing before enabling real calls.
-  Until those choices exist, perform only offline implementation and tests.
-- Add one provider adapter with network deadlines, cancellation, bounded outputs,
-  usage normalization and budget enforcement; credentials come from external
-  configuration and never enter context, reports or logs.
-- Version the prompt and approved output-language policy; test provider failures,
-  malformed output and redaction with offline fixtures before a real run.
-- Execute three repetitions per eligible case within the approved budget; record
-  source/prompt/corpus revisions, real token usage/cost, latency p50/p95 and all
-  boundary failures. Preserve missing usage as unknown and blocked cases as no-call.
-- Review case-specific correctness and passage groundedness separately from
-  schema/citation membership and fake boundary results; report retrieval misses,
-  unsupported diagnoses and abstentions honestly. M5 is not complete until its
-  quality and authenticated-access criteria are demonstrated.
+- Test that the actual C09/C11 retrieved text contains the required operational
+  semantics; source-ID membership alone is insufficient. Keep gold answers out
+  of retrieval/model input and report any changes to the other corpus cases.
+- Retain bounded excerpts, manifest hash/path checks and untrusted-data handling;
+  do not broaden evidence or weaken the schema/citation/fixed-language policy.
+- Reproduce the offline evaluation and record hashes, coverage and limitations
+  separately from the immutable first live campaign. Human review and other
+  M5 quality/authentication criteria remain open; no new live quality claim.
 - Run full Maven validation; no payment actions, automatic recovery, Git push,
   image publication or cloud provisioning is implied.
 - Earlier objectives and criteria are preserved in [PASSATION.md](PASSATION.md).

@@ -1,6 +1,6 @@
 # Roadmap: AI and DevSecOps Demonstrator
 
-Updated: 2026-10-08
+Updated: 2026-10-11
 
 ## Primary objective
 
@@ -15,7 +15,7 @@ Build practical expertise in AI engineering and demonstrate senior DevSecOps cap
 | M2 | Secure image delivery | Completed for cca00ee | Authorized manual run 35661616528 passed all gates and published both images. Registry manifests/configs independently match the tested bundle, source SHA and non-root configuration. See PROJECT_STATE.md and docs/evidence/m2-publication.json. |
 | M3 | Local Kubernetes deployment | Completed locally | Isolated kind/Helm acceptance passed: M2 image digests, restricted non-root workloads, injected Secret, API/infra probes, payment outcomes, upgrade/rollback and PVC retention. Processor listener-health limitation is explicit in ADR 0009; no M3 CI claim. |
 | M4 | Observability and incident exercises | Completed local baseline | Health, logs, counters, traces and committed lag; pinned local Prometheus/Grafana, Viewer dashboard and tested alerts. 119 Maven tests, seven rule cases and isolated scrape-loss/SQL-outage/manual-recovery exercise pass. See PROJECT_STATE.md; no M4 CI or production claim. |
-| M5 | Secure, evaluated incident assistant | In progress | Context builder, bounded diagnosis runner and restricted output checks implemented; 18 cases exercised with an abstaining fake. Gateway authentication, real-model adapter and measured model quality/latency/cost remain open. |
+| M5 | Secure, evaluated incident assistant | In progress | First live campaign completed: 39 generations, USD 0.064752750 estimated, p50/p95 1761/6324 ms. Agent review identifies insufficient assertion coverage and exact-passage support; human review, model injection evaluation and gateway authentication remain open. |
 | M6 | Optional cloud demonstration | Deferred | Choose provider and budget explicitly; reproducible deployment and teardown; no cloud provisioning implied by this roadmap. |
 
 M1–M4 prepare the environment and evidence for M5. Keep these milestones bounded: AI must not be postponed indefinitely by additional payment features. Each milestone needs a reproducible demonstration, not a claim of production readiness.
@@ -25,12 +25,14 @@ evidence, sourced structured diagnosis and abstention, 15–20 evaluation cases
 including prompt injection, measured quality/latency/cost, authenticated access
 and redaction. The offline contract alone does not complete this milestone.
 
-## Current task: M5, first opt-in real-model adapter and evaluation
+## Current task: M5, improve passage support after the first live evaluation
 
-Select a concrete model/provider, sanitized data scope and request/run budget,
-then integrate one opt-in adapter and perform the first measured evaluation.
-Until those choices are approved, keep implementation/tests offline and real calls
-disabled. Retain the fake boundary tests and report model/human quality separately.
+The user approved direct OpenAI / gpt-5.4-mini-2026-03-17, filtered synthetic
+evidence and document excerpts, USD 0.05/call and USD 2.00 for one campaign.
+The first measured campaign is complete and its durable marker must be preserved.
+Quality acceptance is not met; improve C09/C11 passage selection offline next.
+Retain the fake boundary tests and report agent/human quality separately.
+No second campaign is authorized without spend reconciliation and new approval.
 See PROJECT_STATE.md for exact criteria.
 Deterministic payment decisions and manual recovery stay unchanged.
 Keep new payment features and cloud deployment out of scope.
@@ -123,3 +125,15 @@ publications still require the user's approval.
   Output language is intentionally fixed; model quality and real cost remain
   unmeasured. Next select model/data/budget, integrate one opt-in adapter and
   evaluate it. M5 remains in progress; no real provider call, push or CI claim.
+- 2026-10-11: User approved the direct OpenAI API and pinned GPT-5.4 mini model,
+  synthetic filtered context/document scope, USD 0.05/call and USD 2.00 for one
+  campaign after clarification that this is not an account-wide billing cap.
+  Opt-in adapter and repeatable evaluation harness pass 163 local Maven tests,
+  including 40 assistant tests. API credentials/billing access are still needed. M5 remains in progress;
+  no change to milestone order, no live result, push or publication is claimed.
+- 2026-10-11: User requested continuation of M5. The approved single campaign
+  completed with 39 generations and USD 0.064752750 estimated; no budget breach.
+  Agent review finds assertion coverage and exact-passage support below acceptance,
+  with human scores unmeasured. Preserve the marker; next improve C09/C11 passage
+  selection offline. M5 remains in progress; milestone order is unchanged and
+  no second campaign, push, publication or cloud deployment is authorized.

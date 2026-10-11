@@ -625,7 +625,7 @@ cleanup, or add `-Keep` to inspect it afterwards. See the
 [ADR 0014](docs/adr/0014-local-metrics-collection.md). Alerts do not trigger recovery
 or send notifications; application logs/traces remain separate evidence.
 
-## Incident assistant contract (M5, offline first slice)
+## Incident assistant (M5, opt-in evaluation)
 
 The [v1 contract and evaluation corpus](docs/assistant/v1/README.md) define
 read-only diagnosis, sourced findings, abstention, access/redaction requirements
@@ -637,7 +637,12 @@ and inspect `incident-assistant/target/retrieval-coverage.csv`; see the
 The [diagnosis runner](docs/assistant/v1/diagnosis-runner.md) adds bounded inference,
 strict output checks and a per-case report using an abstaining fake. Unknown token
 usage/cost stays unknown; fixed output language intentionally limits free-text replies.
-No model or assistant server is integrated yet; trusted injected identity does
+An [opt-in OpenAI adapter and evaluation launcher](docs/assistant/v1/openai-evaluation.md)
+now enforce the approved model/campaign budget; ordinary tests make no external
+provider calls. The [first live campaign review](docs/assistant/v1/live-evaluation-2026-10-11.md)
+records measured latency/cost and insufficient assertion/passage coverage.
+The approved campaign is consumed; preserve its marker and do not rerun it.
+There is no assistant server; trusted injected identity does
 not establish HTTP authentication or model quality. See
 [ADR 0015](docs/adr/0015-read-only-incident-assistant-contract.md).
 

@@ -7,7 +7,7 @@ import java.time.LocalDate;
 import java.util.Objects;
 import java.util.concurrent.*;
 
-/** No provider implementation or network client is installed by this library. */
+/** Read-only runner; network inference requires an explicitly supplied adapter. */
 public final class DiagnosisRunner implements AutoCloseable {
     public record Input(String policyVersion, ContextBuilder.Bundle context) {}
     public record Tokens(Long input, Long output, Long cachedInput) {}
